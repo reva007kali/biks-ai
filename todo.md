@@ -109,3 +109,8 @@
 - [x] Simplify lead cards - smaller, less detail (detail goes to Brief page)
 - [x] Remove Find Contact button from lead cards in Target Accounts
 - [x] Fix city filter - Exa search still showing Jakarta results regardless of city selection
+
+## Lead Card Enhancements
+- [x] Add company summary to lead cards
+- [x] Add LinkedIn link to lead cards
+- [x] Add location/city to lead cards

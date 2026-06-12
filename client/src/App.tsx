@@ -35,6 +35,7 @@ export interface Lead {
   status: "pending" | "accepted" | "rejected";
   rejectionReason?: string;
   email?: string | null;
+  linkedinUrl?: string | null;
 }
 
 export interface MemoryItem {

@@ -354,12 +354,15 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
       // Extract email from text/highlights if available
       const allText = [r.text || "", r.summary || "", ...(r.highlights || [])].join(" ");
       const emailMatch = allText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+      // Extract LinkedIn URL from text content
+      const linkedinMatch = allText.match(/https?:\/\/(?:www\.)?linkedin\.com\/company\/[a-zA-Z0-9\-_]+/);
       return {
         title: r.title || "Unknown Business",
         url: r.url || "#",
         summary: r.summary || r.highlights?.[0] || "",
         highlights: r.highlights || [],
         email: emailMatch ? emailMatch[0] : null,
+        linkedinUrl: linkedinMatch ? linkedinMatch[0] : null,
         _fullText: allText,
       };
     });

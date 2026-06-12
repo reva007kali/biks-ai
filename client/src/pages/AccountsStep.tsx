@@ -57,6 +57,7 @@ export default function AccountsStep({
         ...r,
         name: r.title,
         email: r.email || null,
+        linkedinUrl: r.linkedinUrl || null,
         fitScore: scoreResult(r, cat.name, city, memories),
         category: cat.name,
         city,
@@ -290,52 +291,77 @@ export default function AccountsStep({
               border: `1px solid ${lead.status === "rejected" ? "#4a2a2a" : lead.status === "accepted" ? "#2a4a37" : "#2a2a2a"}`,
               borderRadius: 10, padding: "14px 16px",
               opacity: lead.status === "rejected" ? 0.45 : 1,
-              display: "flex", alignItems: "center", gap: 14,
               animation: "fadeIn 0.3s ease",
             }}>
-              {/* Score badge */}
-              <ScoreBadge score={lead.fitScore} />
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                {/* Score badge */}
+                <ScoreBadge score={lead.fitScore} />
 
-              {/* Name + URL */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "#f0f0f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {lead.name}
+                {/* Name + URL + Location */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#f0f0f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {lead.name}
+                    </span>
+                    {lead.city && (
+                      <span style={{ fontSize: 10, color: "#888", background: "#1e1e1e", padding: "2px 6px", borderRadius: 4, flexShrink: 0 }}>
+                        📍 {lead.city}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
+                    <a href={lead.url} target="_blank" rel="noopener" style={{ fontSize: 11, color: "#666", textDecoration: "none" }}>
+                      {lead.url?.replace(/^https?:\/\//, "").slice(0, 35)}
+                    </a>
+                    <a
+                      href={lead.linkedinUrl || `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(lead.name)}`}
+                      target="_blank"
+                      rel="noopener"
+                      style={{ fontSize: 10, color: "#5b8af5", textDecoration: "none", background: "#1a2540", padding: "2px 6px", borderRadius: 4, border: "1px solid #2a3f6a" }}
+                    >
+                      LinkedIn {lead.linkedinUrl ? "↗" : "🔍"}
+                    </a>
+                  </div>
                 </div>
-                <a href={lead.url} target="_blank" rel="noopener" style={{ fontSize: 11, color: "#666", textDecoration: "none" }}>
-                  {lead.url?.replace(/^https?:\/\//, "").slice(0, 40)}
-                </a>
+
+                {/* Actions */}
+                {lead.status === "pending" && (
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <button onClick={() => handleAccept(idx)} style={{
+                      background: "none", border: "1px solid #2a4a37", color: "#3ecf8e",
+                      borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    }}>
+                      Accept
+                    </button>
+                    <button onClick={() => setRejectModal(idx)} style={{
+                      background: "none", border: "1px solid #4a2a2a", color: "#f5454a",
+                      borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    }}>
+                      Reject
+                    </button>
+                  </div>
+                )}
+
+                {lead.status === "accepted" && (
+                  <button onClick={() => onSelectLead(lead)} style={{
+                    background: "#f0f0f0", color: "#0f0f0f", border: "none",
+                    borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    flexShrink: 0,
+                  }}>
+                    Generate Brief →
+                  </button>
+                )}
+
+                {lead.status === "rejected" && (
+                  <span style={{ fontSize: 11, color: "#f5454a", flexShrink: 0 }}>Rejected</span>
+                )}
               </div>
 
-              {/* Actions */}
-              {lead.status === "pending" && (
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  <button onClick={() => handleAccept(idx)} style={{
-                    background: "none", border: "1px solid #2a4a37", color: "#3ecf8e",
-                    borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
-                  }}>
-                    Accept
-                  </button>
-                  <button onClick={() => setRejectModal(idx)} style={{
-                    background: "none", border: "1px solid #4a2a2a", color: "#f5454a",
-                    borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
-                  }}>
-                    Reject
-                  </button>
+              {/* Summary */}
+              {lead.summary && (
+                <div style={{ marginTop: 8, paddingLeft: 50, fontSize: 12, color: "#888", lineHeight: 1.5 }}>
+                  {lead.summary.slice(0, 150)}{lead.summary.length > 150 ? "..." : ""}
                 </div>
-              )}
-
-              {lead.status === "accepted" && (
-                <button onClick={() => onSelectLead(lead)} style={{
-                  background: "#f0f0f0", color: "#0f0f0f", border: "none",
-                  borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer",
-                  flexShrink: 0,
-                }}>
-                  Generate Brief →
-                </button>
-              )}
-
-              {lead.status === "rejected" && (
-                <span style={{ fontSize: 11, color: "#f5454a", flexShrink: 0 }}>Rejected</span>
               )}
             </div>
           ))}
