@@ -227,7 +227,44 @@ api.post("/api/mem0", async (req: Request, res: Response) => {
       }),
     });
     const data: any = await memRes.json();
-    const id = data?.results?.[0]?.id || `local_${Date.now()}`;
+
+    // Mem0 v2 returns async responses: [{"status":"PENDING","event_id":"..."}]
+    // or sync responses: [{"id":"...","memory":"..."}] or {"results":[...]}
+    let id = `local_${Date.now()}`;
+
+    if (Array.isArray(data)) {
+      // New async format or direct results array
+      const first = data[0];
+      if (first?.id) {
+        id = first.id;
+      } else if (first?.event_id) {
+        // Async processing - poll for completion (up to 5 seconds)
+        const eventId = first.event_id;
+        for (let i = 0; i < 5; i++) {
+          await new Promise(r => setTimeout(r, 1000));
+          const pollRes = await fetch(`https://api.mem0.ai/v1/memories/?user_id=biks_hackathon_demo`, {
+            headers: { Authorization: `Token ${apiKey}` },
+          });
+          const memories: any = await pollRes.json();
+          if (Array.isArray(memories) && memories.length > 0) {
+            // Find the most recent memory that matches our text
+            const match = memories.find((m: any) =>
+              m.memory && m.memory.toLowerCase().includes(text.toLowerCase().slice(0, 20))
+            );
+            if (match) {
+              id = match.id;
+              break;
+            }
+            // If no exact match, use the most recent one
+            id = memories[memories.length - 1]?.id || id;
+            break;
+          }
+        }
+      }
+    } else if (data?.results?.[0]?.id) {
+      id = data.results[0].id;
+    }
+
     return res.json({ ok: true, id });
   } catch (e: any) {
     return res.json({ ok: false, error: e.message });
