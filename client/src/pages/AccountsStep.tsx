@@ -38,6 +38,7 @@ export default function AccountsStep({
   ];
   const [rejectModal, setRejectModal] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [deletingMemId, setDeletingMemId] = useState<string | null>(null);
 
   const searchLeads = async () => {
     setSearching(true);
@@ -106,10 +107,12 @@ export default function AccountsStep({
   };
 
   const deleteMemory = async (id: string) => {
+    setDeletingMemId(id);
     try {
       await fetch(`/api/mem0?id=${id}`, { method: "DELETE" });
       setMemories(memories.filter(m => m.id !== id));
     } catch {}
+    setDeletingMemId(null);
   };
 
   return (
@@ -186,6 +189,8 @@ export default function AccountsStep({
               display: "flex", alignItems: "center", gap: 6,
               background: "#0e1e16", border: "1px solid #2a4a37",
               borderRadius: 16, padding: "6px 10px",
+              opacity: deletingMemId === m.id ? 0.5 : 1,
+              transition: "opacity 0.2s ease",
             }}>
               <span style={{
                 flex: 1, fontSize: 11, color: "#3ecf8e",
@@ -195,13 +200,23 @@ export default function AccountsStep({
               </span>
               <button
                 onClick={() => deleteMemory(m.id)}
+                disabled={deletingMemId === m.id}
                 style={{
                   background: "none", border: "none", color: "#3ecf8e",
-                  cursor: "pointer", fontSize: 14, padding: "0 2px",
+                  cursor: deletingMemId === m.id ? "not-allowed" : "pointer",
+                  fontSize: 14, padding: "0 2px",
                   opacity: 0.6, lineHeight: 1, flexShrink: 0,
+                  display: "flex", alignItems: "center",
                 }}
               >
-                ×
+                {deletingMemId === m.id ? (
+                  <span style={{
+                    display: "inline-block", width: 10, height: 10,
+                    border: "1.5px solid rgba(62,207,142,0.3)",
+                    borderTopColor: "#3ecf8e", borderRadius: "50%",
+                    animation: "spin 0.6s linear infinite",
+                  }} />
+                ) : "×"}
               </button>
             </div>
           ))}

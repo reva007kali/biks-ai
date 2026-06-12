@@ -13,6 +13,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [fetching, setFetching] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchMemories();
@@ -51,10 +52,12 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
   };
 
   const deleteMemory = async (id: string) => {
+    setDeletingId(id);
     try {
       await fetch(`/api/mem0?id=${id}`, { method: "DELETE" });
       setMemories(memories.filter(m => m.id !== id));
     } catch {}
+    setDeletingId(null);
   };
 
   return (
@@ -169,17 +172,29 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
                 borderRadius: 20, padding: "5px 12px",
                 fontSize: 11, fontWeight: 500,
                 background: "#1a2e24", border: "1px solid #2a4a37", color: "#3ecf8e",
+                opacity: deletingId === m.id ? 0.5 : 1,
+                transition: "opacity 0.2s ease",
               }}>
                 {m.text}
                 <button
                   onClick={() => deleteMemory(m.id)}
+                  disabled={deletingId === m.id}
                   style={{
                     background: "none", border: "none", color: "#3ecf8e",
-                    cursor: "pointer", fontSize: 14, padding: "0 2px",
+                    cursor: deletingId === m.id ? "not-allowed" : "pointer",
+                    fontSize: 14, padding: "0 2px",
                     opacity: 0.6, lineHeight: 1,
+                    display: "flex", alignItems: "center",
                   }}
                 >
-                  ×
+                  {deletingId === m.id ? (
+                    <span style={{
+                      display: "inline-block", width: 10, height: 10,
+                      border: "1.5px solid rgba(62,207,142,0.3)",
+                      borderTopColor: "#3ecf8e", borderRadius: "50%",
+                      animation: "spin 0.6s linear infinite",
+                    }} />
+                  ) : "×"}
                 </button>
               </span>
             ))}
