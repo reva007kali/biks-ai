@@ -1,41 +1,138 @@
-import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
-import ErrorBoundary from "./components/ErrorBoundary";
-import { ThemeProvider } from "./contexts/ThemeContext";
-import Home from "./pages/Home";
+import { useState } from "react";
+import HeroStep from "./pages/HeroStep";
+import DashboardStep from "./pages/DashboardStep";
+import MemoryStep from "./pages/MemoryStep";
+import AccountsStep from "./pages/AccountsStep";
+import BriefStep from "./pages/BriefStep";
+import Navbar from "./components/Navbar";
 
-function Router() {
-  // make sure to consider if you need authentication for certain routes
-  return (
-    <Switch>
-      <Route path={"/"} component={Home} />
-      <Route path={"/404"} component={NotFound} />
-      {/* Final fallback route */}
-      <Route component={NotFound} />
-    </Switch>
-  );
+export interface BusinessProfile {
+  companyName: string;
+  website: string;
+  summary: string;
+  valueProposition: string;
+  currentSegments: string[];
+  products: string[];
+  proofPoints: string[];
+  expansionCategories: ExpansionCategory[];
 }
 
-// NOTE: About Theme
-// - First choose a default theme according to your design style (dark or light bg), than change color palette in index.css
-//   to keep consistent foreground/background color across components
-// - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
+export interface ExpansionCategory {
+  name: string;
+  whyRelevant: string;
+  salesAngle: string;
+  painPoints: string[];
+  searchQueries: string[];
+}
+
+export interface Lead {
+  name: string;
+  url: string;
+  summary: string;
+  highlights: string[];
+  fitScore: number;
+  category: string;
+  city: string;
+  status: "pending" | "accepted" | "rejected";
+  rejectionReason?: string;
+}
+
+export interface MemoryItem {
+  id: string;
+  text: string;
+}
+
+export interface Contact {
+  name: string;
+  title: string;
+  linkedinUrl: string;
+  source: string;
+}
+
+export interface MeetingBrief {
+  accountBrief: string;
+  fitRationale: string;
+  meetingPrep: string;
+  discoveryQuestions: string[];
+  objectionsAndResponses: { objection: string; response: string }[];
+  outreachEmailSubject: string;
+  outreachEmailBody: string;
+  memoriesUsed: string[];
+}
 
 function App() {
+  const [step, setStep] = useState(1);
+  const [business, setBusiness] = useState<BusinessProfile | null>(null);
+  const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [brief, setBrief] = useState<MeetingBrief | null>(null);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+
+  const handleReset = () => {
+    setStep(1);
+    setBusiness(null);
+    setMemories([]);
+    setLeads([]);
+    setSelectedLead(null);
+    setBrief(null);
+    setContacts([]);
+  };
+
   return (
-    <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </ThemeProvider>
-    </ErrorBoundary>
+    <div style={{ minHeight: "100vh", background: "#0f0f0f" }}>
+      {step > 1 && (
+        <Navbar
+          currentStep={step}
+          onStepClick={(s) => { if (s < step) setStep(s); }}
+          onReset={handleReset}
+          website={business?.website || ""}
+        />
+      )}
+      {step === 1 && (
+        <HeroStep
+          onComplete={(data) => { setBusiness(data); setStep(2); }}
+        />
+      )}
+      {step === 2 && business && (
+        <DashboardStep
+          business={business}
+          onNext={() => setStep(3)}
+        />
+      )}
+      {step === 3 && (
+        <MemoryStep
+          memories={memories}
+          setMemories={setMemories}
+          onNext={() => setStep(4)}
+          onBack={() => setStep(2)}
+        />
+      )}
+      {step === 4 && business && (
+        <AccountsStep
+          business={business}
+          memories={memories}
+          setMemories={setMemories}
+          leads={leads}
+          setLeads={setLeads}
+          contacts={contacts}
+          setContacts={setContacts}
+          onSelectLead={(lead) => { setSelectedLead(lead); setStep(5); }}
+          onBack={() => setStep(3)}
+        />
+      )}
+      {step === 5 && business && selectedLead && (
+        <BriefStep
+          business={business}
+          lead={selectedLead}
+          memories={memories}
+          brief={brief}
+          setBrief={setBrief}
+          contacts={contacts}
+          onBack={() => setStep(4)}
+        />
+      )}
+    </div>
   );
 }
 
