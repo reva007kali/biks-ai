@@ -1,50 +1,47 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const makeRequestMock = vi.fn();
-
-vi.mock("./_core/map", () => ({
-  makeRequest: makeRequestMock,
-}));
-
 describe("review opportunity discovery", () => {
+  const originalFetch = global.fetch;
+
   beforeEach(() => {
-    makeRequestMock.mockReset();
+    vi.restoreAllMocks();
+    vi.resetModules();
+    global.fetch = originalFetch;
+    delete process.env.MANUS_API_KEY;
   });
 
-  it("returns live opportunities when matching review complaints are found", async () => {
-    makeRequestMock
-      .mockResolvedValueOnce({
-        results: [
+  it("returns live opportunities when Manus returns complaint-driven results", async () => {
+    process.env.MANUS_API_KEY = "manus-key";
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
           {
-            place_id: "spa-1",
-            name: "Aqua Spa Singapore",
-            formatted_address: "Singapore",
-            rating: 4.1,
-            user_ratings_total: 128,
-            geometry: { location: { lat: 1.3, lng: 103.8 } },
-            types: ["spa"],
+            message: {
+              content: JSON.stringify({
+                sourceMode: "live",
+                results: [
+                  {
+                    businessName: "Aqua Spa Singapore",
+                    location: "Singapore",
+                    sourceUrl: "https://maps.example/spa-1",
+                    rating: 4.1,
+                    reviewCount: 128,
+                    problemDetected: "Dirty water",
+                    painPointCategory: "Water Quality",
+                    matchedKeywords: ["water", "dirty", "filter", "pool"],
+                    reviewEvidence: ["The pool water was dirty and the filter looked broken."],
+                    moncolOpportunity: "Water treatment optimization",
+                    opportunityScore: 5,
+                    memoriesUsed: ["Prefer premium hospitality"],
+                  },
+                ],
+              }),
+            },
           },
         ],
-      })
-      .mockResolvedValueOnce({
-        result: {
-          place_id: "spa-1",
-          name: "Aqua Spa Singapore",
-          formatted_address: "Singapore",
-          rating: 4.1,
-          user_ratings_total: 128,
-          reviews: [
-            {
-              author_name: "Guest",
-              rating: 2,
-              text: "The pool water was dirty and the filter looked broken.",
-              time: 1,
-            },
-          ],
-          url: "https://maps.example/spa-1",
-          geometry: { location: { lat: 1.3, lng: 103.8 } },
-        },
-      });
+      }),
+    }) as typeof fetch;
 
     const { discoverReviewOpportunities } = await import("./reviewOpportunities");
     const result = await discoverReviewOpportunities({
@@ -60,17 +57,27 @@ describe("review opportunity discovery", () => {
       problemDetected: "Dirty water",
       painPointCategory: "Water Quality",
       moncolOpportunity: "Water treatment optimization",
-      sourceUrl: "https://maps.example/spa-1",
     });
-    expect(result.results[0]?.matchedKeywords).toEqual(
-      expect.arrayContaining(["water", "dirty", "filter", "pool", "broken"])
-    );
-    expect(result.results[0]?.opportunityScore).toBeGreaterThanOrEqual(4);
-    expect(result.results[0]?.memoriesUsed.length).toBeGreaterThan(0);
   });
 
-  it("falls back clearly when live access fails", async () => {
-    makeRequestMock.mockRejectedValue(new Error("maps unavailable"));
+  it("falls back with missing MANUS_API_KEY reason", async () => {
+    const { discoverReviewOpportunities } = await import("./reviewOpportunities");
+    const result = await discoverReviewOpportunities({
+      country: "Singapore",
+      businessTypes: ["spa"],
+      memories: [],
+    });
+
+    expect(result.sourceMode).toBe("fallback");
+    expect(result.liveFailureReason).toBe("missing MANUS_API_KEY");
+  });
+
+  it("falls back with manus status reason when Manus request fails", async () => {
+    process.env.MANUS_API_KEY = "manus-key";
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+    }) as typeof fetch;
 
     const { discoverReviewOpportunities } = await import("./reviewOpportunities");
     const result = await discoverReviewOpportunities({
@@ -80,8 +87,36 @@ describe("review opportunity discovery", () => {
     });
 
     expect(result.sourceMode).toBe("fallback");
+    expect(result.liveFailureReason).toBe("manus request failed with status 503");
     expect(result.results.length).toBeGreaterThan(0);
-    expect(result.results[0]?.reviewEvidence[0]).toContain("Fallback demo data");
-    expect(result.results[0]?.sourceUrl).toContain("google.com/maps/search");
+  });
+
+  it("falls back when Manus returns no matching live complaints", async () => {
+    process.env.MANUS_API_KEY = "manus-key";
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                sourceMode: "fallback",
+                results: [],
+              }),
+            },
+          },
+        ],
+      }),
+    }) as typeof fetch;
+
+    const { discoverReviewOpportunities } = await import("./reviewOpportunities");
+    const result = await discoverReviewOpportunities({
+      country: "Singapore",
+      businessTypes: ["spa"],
+      memories: [],
+    });
+
+    expect(result.sourceMode).toBe("fallback");
+    expect(result.liveFailureReason).toBe("live search returned no matching review complaints");
   });
 });

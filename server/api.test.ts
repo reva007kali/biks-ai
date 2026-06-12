@@ -146,4 +146,34 @@ describe("API route handlers", () => {
       close();
     }
   });
+
+  it("POST /api/review-opportunities exposes liveFailureReason when falling back", async () => {
+    const originalManusKey = process.env.MANUS_API_KEY;
+    delete process.env.MANUS_API_KEY;
+
+    const app = createTestApp();
+    const { port, close } = await startServer(app);
+
+    try {
+      const res = await fetch(`http://localhost:${port}/api/review-opportunities`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          country: "Singapore",
+          businessTypes: ["spa", "wellness"],
+        }),
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.sourceMode).toBe("fallback");
+      expect(data.liveFailureReason).toBe("missing MANUS_API_KEY");
+      expect(Array.isArray(data.results)).toBe(true);
+      expect(data.results.length).toBeGreaterThan(0);
+    } finally {
+      close();
+      if (originalManusKey !== undefined) {
+        process.env.MANUS_API_KEY = originalManusKey;
+      }
+    }
+  });
 });
