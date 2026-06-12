@@ -35,22 +35,39 @@ api.post("/api/analyze-website", async (req: Request, res: Response) => {
   try {
     sseSend(res, { type: "progress", pct: 5, message: "Fetching website content...", detail: "Downloading page" });
 
-    // Fetch website content
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    // Fetch website content with retry
     let html = "";
+    const fetchWithTimeout = async (targetUrl: string, timeoutMs: number) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const fetchRes = await fetch(targetUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+          },
+          signal: controller.signal,
+          redirect: "follow",
+        });
+        return await fetchRes.text();
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
     try {
-      const fetchRes = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; BiksBot/1.0)" },
-        signal: controller.signal,
-      });
-      html = await fetchRes.text();
+      html = await fetchWithTimeout(url, 30000);
     } catch (e: any) {
-      sseSend(res, { type: "error", message: `Failed to fetch website: ${e.message}` });
-      res.end();
-      return;
-    } finally {
-      clearTimeout(timeout);
+      // Retry once with longer timeout
+      sseSend(res, { type: "progress", pct: 10, message: "Retrying connection...", detail: "First attempt timed out, retrying" });
+      try {
+        html = await fetchWithTimeout(url, 45000);
+      } catch (e2: any) {
+        sseSend(res, { type: "error", message: `Failed to fetch website: ${e2.message}. The site may be slow or blocking automated requests.` });
+        res.end();
+        return;
+      }
     }
 
     // Strip HTML tags
