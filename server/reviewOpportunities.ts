@@ -25,7 +25,7 @@ export type ReviewOpportunityResponse = {
   liveFailureReason?: string;
 };
 
-const MANUS_API_URL = "https://forge.manus.im/v1/chat/completions";
+const DEFAULT_MANUS_API_BASE_URL = "https://open.manus.ai";
 
 export async function discoverReviewOpportunities(
   request: ReviewOpportunityRequest
@@ -38,152 +38,16 @@ export async function discoverReviewOpportunities(
     };
   }
 
-  try {
-    const liveResponse = await discoverLiveViaManus(request);
-    if (liveResponse.sourceMode === "live" && liveResponse.results.length > 0) {
-      return liveResponse;
-    }
+  // Manus v2 hackathon note:
+  // Live task-based review discovery is intentionally not wired end-to-end yet.
+  // We still resolve config here so the future Manus client uses the correct base URL
+  // and auth header shape: x-manus-api-key.
+  getManusConfig();
 
-    return {
-      sourceMode: "fallback",
-      liveFailureReason: "live search returned no matching review complaints",
-      results: buildFallbackResults(request),
-    };
-  } catch (error) {
-    return {
-      sourceMode: "fallback",
-      liveFailureReason: getManusFailureReason(error),
-      results: buildFallbackResults(request),
-    };
-  }
-}
-
-async function discoverLiveViaManus(
-  request: ReviewOpportunityRequest
-): Promise<ReviewOpportunityResponse> {
-  const memories = request.memories ?? [];
-  const response = await fetch(MANUS_API_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.MANUS_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4.1-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a review-based opportunity discovery assistant for Moncol Pool. Use only live public review information if actually accessible. If you cannot access live public review data, return sourceMode='fallback' with an empty results array. Never fabricate live review evidence.",
-        },
-        {
-          role: "user",
-          content: buildManusPrompt(request.country, request.businessTypes, memories),
-        },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "review_opportunities",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              sourceMode: { type: "string", enum: ["live", "fallback"] },
-              results: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    businessName: { type: "string" },
-                    location: { type: "string" },
-                    sourceUrl: { type: "string" },
-                    rating: { type: ["number", "null"] },
-                    reviewCount: { type: ["number", "null"] },
-                    problemDetected: { type: "string" },
-                    painPointCategory: { type: "string" },
-                    matchedKeywords: {
-                      type: "array",
-                      items: { type: "string" },
-                    },
-                    reviewEvidence: {
-                      type: "array",
-                      items: { type: "string" },
-                    },
-                    moncolOpportunity: { type: "string" },
-                    opportunityScore: { type: "integer" },
-                    memoriesUsed: {
-                      type: "array",
-                      items: { type: "string" },
-                    },
-                  },
-                  required: [
-                    "businessName",
-                    "location",
-                    "sourceUrl",
-                    "rating",
-                    "reviewCount",
-                    "problemDetected",
-                    "painPointCategory",
-                    "matchedKeywords",
-                    "reviewEvidence",
-                    "moncolOpportunity",
-                    "opportunityScore",
-                    "memoriesUsed",
-                  ],
-                  additionalProperties: false,
-                },
-              },
-            },
-            required: ["sourceMode", "results"],
-            additionalProperties: false,
-          },
-        },
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`manus request failed with status ${response.status}`);
-  }
-
-  const payload = await response.json();
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") {
-    return {
-      sourceMode: "fallback",
-      results: [],
-    };
-  }
-
-  const parsed = JSON.parse(content);
-  const results = Array.isArray(parsed.results) ? parsed.results : [];
   return {
-    sourceMode: parsed.sourceMode === "live" ? "live" : "fallback",
-    results: results.map(normalizeResult),
-  };
-}
-
-function normalizeResult(result: Record<string, unknown>): ReviewOpportunityResult {
-  return {
-    businessName: String(result.businessName ?? ""),
-    location: String(result.location ?? ""),
-    sourceUrl: String(result.sourceUrl ?? ""),
-    rating: typeof result.rating === "number" ? result.rating : null,
-    reviewCount: typeof result.reviewCount === "number" ? result.reviewCount : null,
-    problemDetected: String(result.problemDetected ?? ""),
-    painPointCategory: String(result.painPointCategory ?? ""),
-    matchedKeywords: Array.isArray(result.matchedKeywords)
-      ? result.matchedKeywords.map((item) => String(item))
-      : [],
-    reviewEvidence: Array.isArray(result.reviewEvidence)
-      ? result.reviewEvidence.map((item) => String(item))
-      : [],
-    moncolOpportunity: String(result.moncolOpportunity ?? ""),
-    opportunityScore: clampScore(typeof result.opportunityScore === "number" ? result.opportunityScore : 1),
-    memoriesUsed: Array.isArray(result.memoriesUsed)
-      ? result.memoriesUsed.map((item) => String(item))
-      : [],
+    sourceMode: "fallback",
+    liveFailureReason: "manus live task API not configured",
+    results: buildFallbackResults(request),
   };
 }
 
@@ -191,57 +55,14 @@ function clampScore(score: number) {
   return Math.max(1, Math.min(5, Math.round(score)));
 }
 
-function getManusFailureReason(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  const statusMatch = message.match(/status\s+(\d{3})/i);
-  if (statusMatch?.[1]) {
-    return `manus request failed with status ${statusMatch[1]}`;
-  }
-  return "manus request failed with status 0";
-}
-
-function buildManusPrompt(country: string, businessTypes: string[], memories: string[]) {
-  return `Find Moncol Pool sales opportunities from public review complaints.
-
-Country: ${country}
-Business types: ${businessTypes.join(", ")}
-
-Primary keywords:
-- water
-- dirty
-- filter
-
-Secondary keywords:
-- pool
-- maintenance
-- hygiene
-- chlorine
-- smell
-- clean
-- unclean
-- jacuzzi
-- spa
-- sauna
-- broken
-- water quality
-
-Memories for ranking context:
-${memories.length > 0 ? memories.map((memory, idx) => `${idx + 1}. ${memory}`).join("\n") : "None"}
-
-Return live opportunities only if you actually have access to public review evidence and source URLs.
-If you cannot access live public review data, return:
-{
-  "sourceMode": "fallback",
-  "results": []
-}
-
-If you do return live results:
-- focus on Singapore spa / wellness / recovery businesses
-- identify complaint-driven sales signals
-- include only relevant review snippets
-- map each complaint to a Moncol opportunity
-- use memories as ranking context
-- keep opportunityScore between 1 and 5`;
+function getManusConfig() {
+  return {
+    baseUrl: process.env.MANUS_API_BASE_URL || DEFAULT_MANUS_API_BASE_URL,
+    headers: {
+      "x-manus-api-key": process.env.MANUS_API_KEY || "",
+      "Content-Type": "application/json",
+    },
+  };
 }
 
 function buildFallbackResults(
