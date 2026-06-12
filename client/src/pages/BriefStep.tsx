@@ -621,49 +621,65 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                       </div>
                     </div>
 
-                    {/* HTML One-Pager Preview */}
-                    <div style={{ marginBottom: 24 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444" }}>
-                          HTML MARKETING ONE-PAGER
+                    {/* Solutions */}
+                    {salesKit.solutions && salesKit.solutions.length > 0 && (
+                      <div style={{ marginBottom: 24 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
+                          RELEVANT SOLUTIONS
                         </div>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <a
-                            href={salesKit.onePagerUrl}
-                            target="_blank"
-                            rel="noopener"
-                            style={{
-                              background: "#5b8af5", color: "#fff", border: "none",
-                              borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600,
-                              textDecoration: "none", display: "inline-block",
-                            }}
-                          >
-                            Open Full Page ↗
-                          </a>
-                          <a
-                            href={salesKit.onePagerUrl}
-                            download={`${business.companyName}-${lead.name}-kit.html`}
-                            style={{
-                              background: "#3ecf8e", color: "#0a0d14", border: "none",
-                              borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600,
-                              textDecoration: "none", display: "inline-block",
-                            }}
-                          >
-                            Download HTML
-                          </a>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                          {salesKit.solutions.map((s, i) => (
+                            <div key={i} style={{
+                              background: "#161616", border: "1px solid #2a2a2a",
+                              borderRadius: 8, padding: "14px 16px",
+                            }}>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: "#f0f0f0", marginBottom: 4 }}>{s.title}</div>
+                              <div style={{ fontSize: 12, color: "#888", lineHeight: 1.5 }}>{s.description}</div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                      <div style={{
-                        border: "1px solid #2a2a2a", borderRadius: 8, overflow: "hidden",
-                        background: "#fff", height: 500,
-                      }}>
-                        <iframe
-                          src={salesKit.onePagerUrl}
-                          style={{ width: "100%", height: "100%", border: "none" }}
-                          title="Marketing One-Pager Preview"
-                        />
+                    )}
+
+                    {/* Why This Prospect */}
+                    {salesKit.whyThisProspect && salesKit.whyThisProspect.length > 0 && (
+                      <div style={{ marginBottom: 24 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
+                          WHY THIS PROSPECT
+                        </div>
+                        <div style={{ background: "#161616", border: "1px solid #2a2a2a", borderRadius: 8, padding: "16px 20px" }}>
+                          {salesKit.whyThisProspect.map((point, i) => (
+                            <div key={i} style={{
+                              display: "flex", gap: 10, alignItems: "flex-start",
+                              padding: "8px 0", borderBottom: i < salesKit.whyThisProspect.length - 1 ? "1px solid #222" : "none",
+                            }}>
+                              <span style={{ color: "#5b8af5", fontWeight: 700, fontSize: 13, minWidth: 18 }}>{i + 1}.</span>
+                              <span style={{ fontSize: 13, color: "#ccc", lineHeight: 1.5 }}>{point}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {/* Proof Stats */}
+                    {salesKit.proofStats && salesKit.proofStats.length > 0 && (
+                      <div style={{ marginBottom: 24 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
+                          TRACK RECORD
+                        </div>
+                        <div style={{ display: "flex", gap: 12 }}>
+                          {salesKit.proofStats.map((stat, i) => (
+                            <div key={i} style={{
+                              flex: 1, background: "#161616", border: "1px solid #2a2a2a",
+                              borderRadius: 8, padding: "16px", textAlign: "center",
+                            }}>
+                              <div style={{ fontSize: 22, fontWeight: 700, color: "#5b8af5" }}>{stat.number}</div>
+                              <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{stat.label}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Kit-generated Outreach Email */}
                     <div style={{ marginBottom: 24 }}>
@@ -688,7 +704,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                         borderRadius: 10, padding: "16px 20px", marginTop: 16,
                       }}>
                         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 10 }}>
-                          SEND KIT EMAIL + ONE-PAGER LINK
+                          SEND MARKETING EMAIL
                         </div>
                         {kitEmailSent ? (
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -720,7 +736,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                               </button>
                             </div>
                             <p style={{ fontSize: 11, color: "#555", marginTop: 8 }}>
-                              Sends a branded native HTML email with synergies, contacts, and proposal link
+                              Sends a branded native HTML email with outreach message, synergies, and CTA
                             </p>
                             {kitEmailError && (
                               <p style={{ fontSize: 12, color: "#f5454a", marginTop: 8 }}>{kitEmailError}</p>

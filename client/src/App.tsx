@@ -68,8 +68,10 @@ export interface SalesKit {
   suggestedAngle: string;
   outreachEmailSubject: string;
   outreachEmailBody: string;
+  solutions: { title: string; description: string }[];
+  whyThisProspect: string[];
+  proofStats: { number: string; label: string }[];
   memoriesUsed: string[];
-  onePagerUrl: string;
 }
 
 function App() {

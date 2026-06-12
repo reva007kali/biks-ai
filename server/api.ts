@@ -324,37 +324,81 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "query is required" });
   }
 
+  // City-to-country and domain mapping for strict filtering
+  const cityMeta: Record<string, { country: string; domains: string[]; strictTerms: string[] }> = {
+    "singapore": { country: "Singapore", domains: [".sg", ".com.sg"], strictTerms: ["singapore"] },
+    "jakarta": { country: "Indonesia", domains: [".id", ".co.id"], strictTerms: ["jakarta", "jkt"] },
+    "bali": { country: "Indonesia", domains: [".id", ".co.id"], strictTerms: ["bali", "denpasar", "seminyak", "ubud", "canggu", "kuta", "sanur", "nusa dua"] },
+    "kuala lumpur": { country: "Malaysia", domains: [".my", ".com.my"], strictTerms: ["kuala lumpur", "kl ", "petaling jaya", "bangsar", "mont kiara"] },
+    "bangkok": { country: "Thailand", domains: [".th", ".co.th"], strictTerms: ["bangkok", "bkk", "sukhumvit", "silom", "sathorn"] },
+    "ho chi minh city": { country: "Vietnam", domains: [".vn", ".com.vn"], strictTerms: ["ho chi minh", "hcmc", "saigon", "district 1", "district 2", "district 7"] },
+    "manila": { country: "Philippines", domains: [".ph", ".com.ph"], strictTerms: ["manila", "makati", "bgc", "taguig", "quezon city", "pasig"] },
+    "hong kong": { country: "Hong Kong", domains: [".hk", ".com.hk"], strictTerms: ["hong kong", "hongkong", "central", "wan chai", "tsim sha tsui"] },
+    "tokyo": { country: "Japan", domains: [".jp", ".co.jp"], strictTerms: ["tokyo", "shibuya", "shinjuku", "roppongi", "minato", "ginza"] },
+    "sydney": { country: "Australia", domains: [".au", ".com.au"], strictTerms: ["sydney", "nsw", "bondi", "surry hills", "darling harbour"] },
+    "dubai": { country: "UAE", domains: [".ae"], strictTerms: ["dubai", "jumeirah", "marina", "deira", "business bay"] },
+    "london": { country: "United Kingdom", domains: [".uk", ".co.uk"], strictTerms: ["london", "mayfair", "shoreditch", "canary wharf", "soho"] },
+    "new york": { country: "United States", domains: [".com"], strictTerms: ["new york", "nyc", "manhattan", "brooklyn", "queens"] },
+  };
+
+  const meta = cityMeta[city?.toLowerCase()] || { country: city || "", domains: [], strictTerms: [city?.toLowerCase() || ""] };
+
   try {
-    const exaRes = await fetch("https://api.exa.ai/search", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        query: city ? `${query} company based in ${city} ${city === 'Bali' ? 'Indonesia' : city === 'Jakarta' ? 'Indonesia' : city === 'Kuala Lumpur' ? 'Malaysia' : city === 'Bangkok' ? 'Thailand' : city === 'Ho Chi Minh City' ? 'Vietnam' : city === 'Manila' ? 'Philippines' : city === 'Hong Kong' ? 'China' : city === 'Tokyo' ? 'Japan' : city === 'Sydney' ? 'Australia' : city === 'Dubai' ? 'UAE' : ''}` : query,
+    // Strategy: Run TWO separate Exa queries for better city-specific results
+    // Query 1: Explicit city-focused query
+    // Query 2: Country domain-restricted query
+    const cityQuery = city
+      ? `${query} located in ${city}, ${meta.country}`
+      : query;
+
+    const fetchExa = async (q: string, includeDomains?: string[]) => {
+      const body: any = {
+        query: q,
         type: "auto",
         category: "company",
-        numResults,
+        numResults: numResults + 5, // fetch extra for post-filtering
         contents: {
           text: { maxCharacters: 2000 },
           highlights: true,
           summary: true,
         },
-      }),
-    });
+      };
+      if (includeDomains && includeDomains.length > 0) {
+        body.includeDomains = includeDomains.map(d => d.startsWith(".") ? `*${d}` : d);
+      }
+      const r = await fetch("https://api.exa.ai/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) return [];
+      const d: any = await r.json();
+      return d.results || [];
+    };
 
-    if (!exaRes.ok) {
-      const errText = await exaRes.text();
-      return res.status(exaRes.status).json({ error: errText });
+    // Run both queries in parallel
+    const [results1, results2] = await Promise.all([
+      fetchExa(cityQuery),
+      meta.domains.length > 0 && meta.domains[0] !== ".com"
+        ? fetchExa(query, meta.domains)
+        : Promise.resolve([]),
+    ]);
+
+    // Merge and deduplicate by URL
+    const seen = new Set<string>();
+    const merged: any[] = [];
+    for (const r of [...results1, ...results2]) {
+      const url = (r.url || "").toLowerCase().replace(/\/$/, "");
+      if (!seen.has(url)) {
+        seen.add(url);
+        merged.push(r);
+      }
     }
 
-    const data: any = await exaRes.json();
-    const allResults = (data.results || []).map((r: any) => {
-      // Extract email from text/highlights if available
+    // Process results
+    const allResults = merged.map((r: any) => {
       const allText = [r.text || "", r.summary || "", ...(r.highlights || [])].join(" ");
       const emailMatch = allText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
-      // Extract LinkedIn URL from text content
       const linkedinMatch = allText.match(/https?:\/\/(?:www\.)?linkedin\.com\/company\/[a-zA-Z0-9\-_]+/);
       return {
         title: r.title || "Unknown Business",
@@ -364,39 +408,27 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
         email: emailMatch ? emailMatch[0] : null,
         linkedinUrl: linkedinMatch ? linkedinMatch[0] : null,
         _fullText: allText,
+        _url: (r.url || "").toLowerCase(),
       };
     });
 
-    // Post-filter: only keep results that mention the city (or its known aliases) in their content/URL
+    // STRICT post-filter: company MUST mention the city explicitly in text, title, or URL
+    // Domain-only match is NOT sufficient (e.g. .co.id could be any Indonesian city)
     let results = allResults;
     if (city) {
-      const cityLower = city.toLowerCase();
-      const cityAliases: Record<string, string[]> = {
-        "singapore": ["singapore", ".sg", ".com.sg"],
-        "jakarta": ["jakarta", "jkt"],
-        "bali": ["bali", "denpasar", "seminyak", "ubud", "canggu", "kuta"],
-        "kuala lumpur": ["kuala lumpur", "kl", "petaling jaya"],
-        "bangkok": ["bangkok", "bkk", "sukhumvit"],
-        "ho chi minh city": ["ho chi minh", "hcmc", "saigon"],
-        "manila": ["manila", "makati", "bgc", "taguig"],
-        "hong kong": ["hong kong", "hongkong", ".hk"],
-        "tokyo": ["tokyo", "shibuya", "shinjuku", "roppongi"],
-        "sydney": ["sydney", "nsw"],
-        "dubai": ["dubai", "uae", "abu dhabi"],
-        "london": ["london", ".co.uk"],
-        "new york": ["new york", "nyc", "manhattan", "brooklyn"],
-      };
-      const aliases = cityAliases[cityLower] || [cityLower];
       results = allResults.filter((r: any) => {
-        const searchText = (r._fullText + " " + r.url + " " + r.title).toLowerCase();
-        return aliases.some(alias => searchText.includes(alias));
+        const searchText = (r._fullText + " " + r._url + " " + r.title).toLowerCase();
+        // MUST match at least one strict city term in content/title/URL
+        return meta.strictTerms.some(term => searchText.includes(term));
       });
-      // If filtering removes all results, return empty - don't show irrelevant cities
-      // This ensures users only see results actually related to their selected city
     }
 
-    // Remove internal _fullText field before returning
-    results = results.map(({ _fullText, ...rest }: any) => rest);
+    // Remove internal fields before returning
+    results = results.slice(0, numResults).map(({ _fullText, _url, ...rest }: any) => rest);
+
+    if (results.length === 0 && city) {
+      return res.json({ results: [], message: `No companies found specifically in ${city}. Try a different category or city.` });
+    }
 
     return res.json({ results });
   } catch (e: any) {
@@ -575,7 +607,7 @@ Return ONLY valid JSON (no markdown) with this structure:
 });
 
 // ============================================================
-// POST /api/generate-sales-kit — SSE streaming sales kit with HTML one-pager
+// POST /api/generate-sales-kit — SSE streaming sales kit generation
 // ============================================================
 api.post("/api/generate-sales-kit", async (req: Request, res: Response) => {
   sseHeaders(res);
@@ -588,55 +620,16 @@ api.post("/api/generate-sales-kit", async (req: Request, res: Response) => {
   }
 
   try {
-    // Phase 1: Fetch seller website for design tokens
-    sseSend(res, { type: "progress", pct: 5, message: "Analyzing seller website...", detail: "Extracting design language" });
+    // Phase 1: Fetch prospect website for context
+    sseSend(res, { type: "progress", pct: 10, message: "Researching prospect...", detail: "Fetching prospect website" });
 
-    let sellerHtml = "";
-    let sellerCss = "";
-    try {
-      const sellerRes = await fetch(business.website, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; BiksBot/1.0)" },
-        signal: AbortSignal.timeout(10000),
-      });
-      sellerHtml = await sellerRes.text();
-
-      // Try to extract CSS link
-      const cssMatch = sellerHtml.match(/href="([^"]*\.css[^"]*)"/i);
-      if (cssMatch) {
-        const cssUrl = cssMatch[1].startsWith("http") ? cssMatch[1] : new URL(cssMatch[1], business.website).href;
-        try {
-          const cssRes = await fetch(cssUrl, { signal: AbortSignal.timeout(5000) });
-          sellerCss = (await cssRes.text()).slice(0, 3000);
-        } catch {}
-      }
-    } catch {}
-
-    // Extract design tokens from CSS/HTML
-    const colorMatches = (sellerCss + sellerHtml).match(/#[0-9a-fA-F]{6}/g) || [];
-    const primaryColor = colorMatches[0] || "#1a5276";
-    const fontMatch = (sellerCss + sellerHtml).match(/font-family[:\s]*['"]?([^;'"\}]+)/i);
-    const fontFamily = fontMatch ? fontMatch[1].trim().split(",")[0].replace(/['"]*/g, "") : "Inter";
-
-    // Try to find logo
-    const logoMatch = sellerHtml.match(/<img[^>]*(?:logo|brand)[^>]*src=["']([^"']+)["']/i)
-      || sellerHtml.match(/<img[^>]*src=["']([^"']*logo[^"']*)["']/i);
-    const sellerLogoUrl = logoMatch ? (logoMatch[1].startsWith("http") ? logoMatch[1] : new URL(logoMatch[1], business.website).href) : "";
-
-    sseSend(res, { type: "progress", pct: 15, message: "Analyzing prospect website...", detail: "Fetching prospect data" });
-
-    // Phase 2: Fetch prospect website
     let prospectContent = "";
-    let prospectLogoUrl = "";
     try {
       const prospectRes = await fetch(lead.url, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; BiksBot/1.0)" },
-        signal: AbortSignal.timeout(10000),
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+        signal: AbortSignal.timeout(15000),
       });
       const prospectHtml = await prospectRes.text();
-      const pLogoMatch = prospectHtml.match(/<img[^>]*(?:logo|brand)[^>]*src=["']([^"']+)["']/i)
-        || prospectHtml.match(/<img[^>]*src=["']([^"']*logo[^"']*)["']/i);
-      prospectLogoUrl = pLogoMatch ? (pLogoMatch[1].startsWith("http") ? pLogoMatch[1] : new URL(pLogoMatch[1], lead.url).href) : "";
-
       prospectContent = prospectHtml
         .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
         .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
@@ -648,7 +641,7 @@ api.post("/api/generate-sales-kit", async (req: Request, res: Response) => {
 
     sseSend(res, { type: "progress", pct: 30, message: "Generating sales kit...", detail: "AI analyzing synergies" });
 
-    // Phase 3: Generate the full sales kit via LLM
+    // Phase 2: Generate the sales kit via LLM
     const memoryText = Array.isArray(memories) && memories.length > 0
       ? memories.map((m: string, i: number) => `${i + 1}. ${m}`).join("\n")
       : "None saved.";
@@ -676,10 +669,11 @@ Business Memories & Preferences:
 ${memoryText}
 
 Generate a complete B2B sales kit with:
-1. Account Brief - what the prospect does, why commercially relevant now, top synergies (seller product → prospect pain point → evidence from website)
-2. Outreach Email - under 180 words, specific opening referencing something from prospect's website, connect ONE seller capability to ONE prospect pain, low-friction CTA, peer-to-peer tone
+1. Account Brief - what the prospect does, why commercially relevant now, top synergies
+2. Outreach Email - under 180 words, specific opening referencing prospect's website, connect ONE seller capability to ONE prospect pain, low-friction CTA, peer-to-peer tone
 3. Synergies - list of seller products matched to prospect pain points with evidence
-4. One-pager content - hero headline, subheadline, intro statement, about seller text, solution items (6), why-this-prospect points (4), proof stats (3), CTA text
+4. Solutions - 4-6 key solutions the seller offers that are relevant to this prospect
+5. Why This Prospect - 4 specific reasons tied to evidence from their website
 
 Return ONLY valid JSON with this structure:
 {
@@ -689,18 +683,9 @@ Return ONLY valid JSON with this structure:
   "suggestedAngle": "One-sentence BD angle",
   "outreachEmailSubject": "Subject line under 65 chars, curiosity-driven",
   "outreachEmailBody": "Full email body under 180 words",
-  "onePager": {
-    "heroHeadline": "Bold headline for the one-pager",
-    "heroSubheadline": "Supporting subheadline",
-    "introStatement": "Single sentence establishing core opportunity",
-    "aboutSeller": "2 paragraphs about the seller",
-    "solutions": [{"title": "...", "description": "One sentence"}],
-    "whyThisProspect": ["Point 1 tied to evidence", "Point 2", "Point 3", "Point 4"],
-    "proofStats": [{"number": "50+", "label": "Projects Delivered"}],
-    "ctaHeadline": "CTA section headline",
-    "ctaButtonText": "Button text",
-    "ctaContact": "Contact details"
-  },
+  "solutions": [{"title": "...", "description": "One sentence"}],
+  "whyThisProspect": ["Point 1 tied to evidence", "Point 2", "Point 3", "Point 4"],
+  "proofStats": [{"number": "50+", "label": "Projects Delivered"}],
   "memoriesUsed": ["which memories influenced this"]
 }`;
 
@@ -735,55 +720,41 @@ Return ONLY valid JSON with this structure:
               suggestedAngle: { type: "string" },
               outreachEmailSubject: { type: "string" },
               outreachEmailBody: { type: "string" },
-              onePager: {
-                type: "object",
-                properties: {
-                  heroHeadline: { type: "string" },
-                  heroSubheadline: { type: "string" },
-                  introStatement: { type: "string" },
-                  aboutSeller: { type: "string" },
-                  solutions: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        title: { type: "string" },
-                        description: { type: "string" },
-                      },
-                      required: ["title", "description"],
-                      additionalProperties: false,
-                    },
+              solutions: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    title: { type: "string" },
+                    description: { type: "string" },
                   },
-                  whyThisProspect: { type: "array", items: { type: "string" } },
-                  proofStats: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        number: { type: "string" },
-                        label: { type: "string" },
-                      },
-                      required: ["number", "label"],
-                      additionalProperties: false,
-                    },
-                  },
-                  ctaHeadline: { type: "string" },
-                  ctaButtonText: { type: "string" },
-                  ctaContact: { type: "string" },
+                  required: ["title", "description"],
+                  additionalProperties: false,
                 },
-                required: ["heroHeadline", "heroSubheadline", "introStatement", "aboutSeller", "solutions", "whyThisProspect", "proofStats", "ctaHeadline", "ctaButtonText", "ctaContact"],
-                additionalProperties: false,
+              },
+              whyThisProspect: { type: "array", items: { type: "string" } },
+              proofStats: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    number: { type: "string" },
+                    label: { type: "string" },
+                  },
+                  required: ["number", "label"],
+                  additionalProperties: false,
+                },
               },
               memoriesUsed: { type: "array", items: { type: "string" } },
             },
-            required: ["accountBrief", "whyRelevantNow", "synergies", "suggestedAngle", "outreachEmailSubject", "outreachEmailBody", "onePager", "memoriesUsed"],
+            required: ["accountBrief", "whyRelevantNow", "synergies", "suggestedAngle", "outreachEmailSubject", "outreachEmailBody", "solutions", "whyThisProspect", "proofStats", "memoriesUsed"],
             additionalProperties: false,
           },
         },
       },
     });
 
-    sseSend(res, { type: "progress", pct: 70, message: "Building HTML one-pager...", detail: "Assembling branded document" });
+    sseSend(res, { type: "progress", pct: 80, message: "Processing results...", detail: "Finalizing sales kit" });
 
     const content_text = result.choices[0]?.message?.content;
     let kit: any;
@@ -793,139 +764,6 @@ Return ONLY valid JSON with this structure:
     } else {
       throw new Error("No content in LLM response");
     }
-
-    // Phase 4: Build HTML one-pager
-    const op = kit.onePager;
-    const htmlOnePager = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${business.companyName} × ${lead.name} — Sales Kit</title>
-<!-- Fonts loaded from Google as enhancement; falls back to system fonts -->
-<link href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontFamily)}:wght@400;600;700&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #f5f5f5; font-family: '${fontFamily}', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1a1a1a; }
-.wrapper { max-width: 600px; margin: 0 auto; background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
-.accent-bar { height: 4px; background: linear-gradient(90deg, ${primaryColor}, ${primaryColor}88); }
-.top-bar { background: ${primaryColor}; padding: 8px 24px; text-align: center; }
-.top-bar span { color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; }
-.navbar { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid #eee; }
-.navbar .logos { display: flex; align-items: center; gap: 12px; }
-.navbar .logos img { height: 28px; max-width: 120px; object-fit: contain; }
-.navbar .logos .divider { width: 1px; height: 24px; background: #ddd; }
-.navbar .badge { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #999; border: 1px solid #ddd; padding: 3px 8px; border-radius: 3px; }
-.hero { background: ${primaryColor}; padding: 48px 32px; text-align: center; }
-.hero h1 { font-family: 'Playfair Display', serif; font-size: 28px; color: #fff; margin-bottom: 12px; font-weight: 700; }
-.hero p { font-size: 14px; color: rgba(255,255,255,0.85); margin-bottom: 20px; }
-.hero .cta-btn { display: inline-block; background: #fff; color: ${primaryColor}; font-size: 13px; font-weight: 700; padding: 10px 24px; border-radius: 4px; text-decoration: none; }
-.partner-strip { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 20px 24px; background: #fafafa; border-bottom: 1px solid #eee; }
-.partner-strip span { font-size: 11px; color: #888; font-weight: 600; }
-.partner-strip img { height: 22px; max-width: 100px; object-fit: contain; }
-.intro { padding: 32px 32px 24px; text-align: center; }
-.intro p { font-family: 'Playfair Display', serif; font-style: italic; font-size: 16px; color: #444; line-height: 1.6; }
-.about { padding: 24px 32px; }
-.about h2 { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: ${primaryColor}; margin-bottom: 12px; }
-.about p { font-size: 13px; color: #444; line-height: 1.7; margin-bottom: 12px; }
-.solutions { padding: 24px 32px; }
-.solutions h2 { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: ${primaryColor}; margin-bottom: 16px; }
-.solutions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.solution-cell { padding: 14px; border: 1px solid #eee; border-radius: 6px; }
-.solution-cell .dot { width: 8px; height: 8px; border-radius: 50%; background: ${primaryColor}; display: inline-block; margin-right: 8px; }
-.solution-cell h3 { font-size: 13px; font-weight: 700; display: inline; }
-.solution-cell p { font-size: 12px; color: #666; margin-top: 6px; line-height: 1.5; }
-.why-section { background: #1a2332; padding: 32px; }
-.why-section h2 { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.6); margin-bottom: 16px; }
-.why-section ol { list-style: none; counter-reset: why; }
-.why-section li { counter-increment: why; font-size: 13px; color: rgba(255,255,255,0.9); padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.1); line-height: 1.5; }
-.why-section li::before { content: counter(why) "."; font-weight: 700; color: ${primaryColor}; margin-right: 10px; }
-.proof { padding: 32px; text-align: center; }
-.proof h2 { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: ${primaryColor}; margin-bottom: 16px; }
-.proof-grid { display: flex; justify-content: center; gap: 24px; }
-.proof-cell { text-align: center; }
-.proof-cell .number { font-family: 'Playfair Display', serif; font-size: 28px; font-weight: 700; color: ${primaryColor}; }
-.proof-cell .label { font-size: 11px; color: #888; margin-top: 4px; }
-.quote { padding: 32px; text-align: center; border-top: 1px solid #eee; }
-.quote p { font-family: 'Playfair Display', serif; font-style: italic; font-size: 16px; color: #333; line-height: 1.6; }
-.cta-section { background: ${primaryColor}; padding: 32px; text-align: center; }
-.cta-section h2 { font-family: 'Playfair Display', serif; font-size: 22px; color: #fff; margin-bottom: 16px; }
-.cta-section .btn { display: inline-block; background: #fff; color: ${primaryColor}; font-size: 13px; font-weight: 700; padding: 10px 24px; border-radius: 4px; text-decoration: none; margin-bottom: 12px; }
-.cta-section .contact { font-size: 12px; color: rgba(255,255,255,0.8); }
-.footer { padding: 20px 24px; text-align: center; border-top: 1px solid #eee; }
-.footer img { height: 20px; margin-bottom: 8px; }
-.footer p { font-size: 10px; color: #aaa; }
-</style>
-</head>
-<body>
-<div class="wrapper">
-  <div class="accent-bar"></div>
-  <div class="top-bar"><span>Confidential Sales Brief</span></div>
-  <div class="navbar">
-    <div class="logos">
-      ${sellerLogoUrl ? `<img src="${sellerLogoUrl}" alt="${business.companyName}">` : `<span style="font-weight:700;font-size:14px;">${business.companyName}</span>`}
-      <div class="divider"></div>
-      ${prospectLogoUrl ? `<img src="${prospectLogoUrl}" alt="${lead.name}">` : `<span style="font-weight:700;font-size:14px;">${lead.name}</span>`}
-    </div>
-    <div class="badge">Confidential</div>
-  </div>
-  <div class="hero">
-    <h1>${op.heroHeadline}</h1>
-    <p>${op.heroSubheadline}</p>
-    <a href="mailto:${business.website ? 'hello@' + new URL(business.website).hostname : ''}" class="cta-btn">${op.ctaButtonText}</a>
-  </div>
-  <div class="partner-strip">
-    <span>Presented to</span>
-    ${prospectLogoUrl ? `<img src="${prospectLogoUrl}" alt="${lead.name}">` : `<strong>${lead.name}</strong>`}
-    <span>by</span>
-    ${sellerLogoUrl ? `<img src="${sellerLogoUrl}" alt="${business.companyName}">` : `<strong>${business.companyName}</strong>`}
-  </div>
-  <div class="intro"><p>${op.introStatement}</p></div>
-  <div class="about">
-    <h2>About ${business.companyName}</h2>
-    <p>${op.aboutSeller}</p>
-  </div>
-  <div class="solutions">
-    <h2>Solutions</h2>
-    <div class="solutions-grid">
-      ${(op.solutions || []).map((s: any) => `<div class="solution-cell"><span class="dot"></span><h3>${s.title}</h3><p>${s.description}</p></div>`).join("\n      ")}
-    </div>
-  </div>
-  <div class="why-section">
-    <h2>Why ${lead.name}?</h2>
-    <ol>
-      ${(op.whyThisProspect || []).map((p: string) => `<li>${p}</li>`).join("\n      ")}
-    </ol>
-  </div>
-  <div class="proof">
-    <h2>Track Record</h2>
-    <div class="proof-grid">
-      ${(op.proofStats || []).map((s: any) => `<div class="proof-cell"><div class="number">${s.number}</div><div class="label">${s.label}</div></div>`).join("\n      ")}
-    </div>
-  </div>
-  <div class="quote"><p>"${business.valueProposition}"</p></div>
-  <div class="cta-section">
-    <h2>${op.ctaHeadline}</h2>
-    <a href="mailto:${business.website ? 'hello@' + new URL(business.website).hostname : ''}" class="btn">${op.ctaButtonText}</a>
-    <div class="contact">${op.ctaContact}</div>
-  </div>
-  <div class="footer">
-    ${sellerLogoUrl ? `<img src="${sellerLogoUrl}" alt="${business.companyName}">` : `<strong>${business.companyName}</strong>`}
-    <p>© ${new Date().getFullYear()} ${business.companyName}. All rights reserved.</p>
-  </div>
-</div>
-</body>
-</html>`;
-
-    // Save HTML to storage
-    sseSend(res, { type: "progress", pct: 90, message: "Saving one-pager...", detail: "Uploading to storage" });
-
-    const { storagePut } = await import("./storage");
-    const { url: htmlUrl } = await storagePut(
-      `sales-kits/${business.companyName.replace(/\s+/g, "-").toLowerCase()}-${lead.name.replace(/\s+/g, "-").toLowerCase()}.html`,
-      htmlOnePager,
-      "text/html",
-    );
 
     sseSend(res, { type: "progress", pct: 95, message: "Complete!", detail: "Sales kit ready" });
     sseSend(res, {
@@ -937,8 +775,10 @@ body { background: #f5f5f5; font-family: '${fontFamily}', -apple-system, BlinkMa
         suggestedAngle: kit.suggestedAngle,
         outreachEmailSubject: kit.outreachEmailSubject,
         outreachEmailBody: kit.outreachEmailBody,
+        solutions: kit.solutions,
+        whyThisProspect: kit.whyThisProspect,
+        proofStats: kit.proofStats,
         memoriesUsed: kit.memoriesUsed,
-        onePagerUrl: htmlUrl,
       },
     });
   } catch (e: any) {
@@ -1031,7 +871,7 @@ api.post("/api/send-kit-email", async (req: Request, res: Response) => {
     </div>
   ` : "";
 
-  const onePagerUrl = salesKit.onePagerUrl ? `${req.protocol}://${req.get('host')}${salesKit.onePagerUrl}` : "";
+  // No one-pager URL - email is fully native HTML
 
   const htmlBody = `<!DOCTYPE html>
 <html>
@@ -1092,7 +932,7 @@ api.post("/api/send-kit-email", async (req: Request, res: Response) => {
     <div style="background:linear-gradient(135deg,#5b8af5,#3ecf8e);border-radius:10px;padding:32px;">
       <h3 style="font-size:18px;font-weight:700;color:#fff;margin:0 0 12px;">Let's Explore This Together</h3>
       <p style="font-size:13px;color:rgba(255,255,255,0.8);margin:0 0 20px;">${salesKit.suggestedAngle}</p>
-      ${onePagerUrl ? `<a href="${onePagerUrl}" style="display:inline-block;background:#fff;color:#0f0f0f;font-size:13px;font-weight:700;padding:12px 28px;border-radius:6px;text-decoration:none;">View Full Proposal →</a>` : ''}
+      <a href="${business.website || '#'}" style="display:inline-block;background:#fff;color:#0f0f0f;font-size:13px;font-weight:700;padding:12px 28px;border-radius:6px;text-decoration:none;">Schedule a Call →</a>
     </div>
   </div>
 

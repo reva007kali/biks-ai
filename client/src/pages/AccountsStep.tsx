@@ -20,6 +20,7 @@ export default function AccountsStep({
   const [selectedCategory, setSelectedCategory] = useState(initialCategory);
   const [city, setCity] = useState("Singapore");
   const [searching, setSearching] = useState(false);
+  const [searchMessage, setSearchMessage] = useState("");
 
   const cityOptions = [
     "Singapore",
@@ -47,12 +48,16 @@ export default function AccountsStep({
     const query = `${baseQuery} in ${city}`;
 
     try {
+      setSearchMessage("");
       const res = await fetch("/api/exa-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query, city, numResults: 8 }),
       });
       const data = await res.json();
+      if (data.message) {
+        setSearchMessage(data.message);
+      }
       const scored = (data.results || []).map((r: any) => ({
         ...r,
         name: r.title,
@@ -267,7 +272,11 @@ export default function AccountsStep({
             background: "#161616", border: "1px solid #2a2a2a", borderRadius: 12, padding: 40,
             textAlign: "center",
           }}>
-            <p style={{ color: "#555", fontSize: 14 }}>Select a category and city, then click "Search Leads" to find target accounts.</p>
+            {searchMessage ? (
+              <p style={{ color: "#f5a623", fontSize: 14 }}>{searchMessage}</p>
+            ) : (
+              <p style={{ color: "#555", fontSize: 14 }}>Select a category and city, then click "Search Leads" to find target accounts.</p>
+            )}
           </div>
         )}
 

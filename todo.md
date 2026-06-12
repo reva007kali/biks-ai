@@ -120,3 +120,12 @@
 - [x] Display contacts section in Account Brief tab below Fit Rationale
 - [x] Marketing Kit email: send as native HTML email (not link to one-pager)
 - [x] Marketing Kit email design: modern, Biks.ai themed, accurate data from selected company
+
+## Strict City Filter & Marketing Kit Email Redesign
+- [x] Exa city filter must be strict - only show companies actually from the selected city
+- [x] Add multiple validation layers for city filtering (domain, text content, URL)
+- [x] Return empty results with message if no companies match the city
+- [x] Marketing Kit: remove HTML one-pager attachment/link approach
+- [x] Marketing Kit: send as native email with modern design directly in body
+- [x] Marketing Kit email: dynamic data from selected company (not hardcoded)
+- [x] Marketing Kit email: modern dark-themed design matching Biks.ai aesthetic
