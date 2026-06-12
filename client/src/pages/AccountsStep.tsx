@@ -38,20 +38,18 @@ export default function AccountsStep({
   ];
   const [rejectModal, setRejectModal] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState("");
-  const [findingContacts, setFindingContacts] = useState<number | null>(null);
 
   const searchLeads = async () => {
     setSearching(true);
     const cat = business.expansionCategories[selectedCategory];
     const baseQuery = cat.searchQueries?.[0] || `${cat.name} premium`;
-    // Ensure city is prominently in the query for location filtering
     const query = `${baseQuery} in ${city}`;
 
     try {
       const res = await fetch("/api/exa-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, city, numResults: 5 }),
+        body: JSON.stringify({ query, city, numResults: 8 }),
       });
       const data = await res.json();
       const scored = (data.results || []).map((r: any) => ({
@@ -75,7 +73,6 @@ export default function AccountsStep({
     updated[idx] = { ...updated[idx], status: "rejected", rejectionReason: rejectReason };
     setLeads(updated);
 
-    // Save rejection to Mem0
     try {
       const res = await fetch("/api/mem0", {
         method: "POST",
@@ -88,7 +85,6 @@ export default function AccountsStep({
       }
     } catch {}
 
-    // Re-score remaining leads
     const reScored = updated.map(l => ({
       ...l,
       fitScore: l.status === "rejected" ? l.fitScore : scoreResult(l, l.category, l.city, [...memories, { id: "tmp", text: rejectReason }]),
@@ -109,18 +105,11 @@ export default function AccountsStep({
     setLeads(updated);
   };
 
-  const findContacts = async (lead: Lead, idx: number) => {
-    setFindingContacts(idx);
+  const deleteMemory = async (id: string) => {
     try {
-      const res = await fetch("/api/find-contacts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadName: lead.name, city: lead.city }),
-      });
-      const data = await res.json();
-      if (data.contacts) setContacts(data.contacts);
+      await fetch(`/api/mem0?id=${id}`, { method: "DELETE" });
+      setMemories(memories.filter(m => m.id !== id));
     } catch {}
-    setFindingContacts(null);
   };
 
   return (
@@ -187,20 +176,36 @@ export default function AccountsStep({
 
         <div style={{ height: 1, background: "#1e1e1e", margin: "16px 0" }} />
 
-        {/* Memories */}
+        {/* Active Memories with delete */}
         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
           ACTIVE MEMORIES ({memories.length})
         </div>
-        {memories.slice(0, 5).map(m => (
-          <div key={m.id} style={{
-            fontSize: 11, color: "#3ecf8e", padding: "3px 8px",
-            background: "#0e1e16", border: "1px solid #2a4a37",
-            borderRadius: 10, marginBottom: 4, overflow: "hidden",
-            textOverflow: "ellipsis", whiteSpace: "nowrap",
-          }}>
-            {m.text}
-          </div>
-        ))}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {memories.map(m => (
+            <div key={m.id} style={{
+              display: "flex", alignItems: "center", gap: 6,
+              background: "#0e1e16", border: "1px solid #2a4a37",
+              borderRadius: 16, padding: "6px 10px",
+            }}>
+              <span style={{
+                flex: 1, fontSize: 11, color: "#3ecf8e",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {m.text}
+              </span>
+              <button
+                onClick={() => deleteMemory(m.id)}
+                style={{
+                  background: "none", border: "none", color: "#3ecf8e",
+                  cursor: "pointer", fontSize: 14, padding: "0 2px",
+                  opacity: 0.6, lineHeight: 1, flexShrink: 0,
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
 
         <div style={{ marginTop: "auto", paddingTop: 20, borderTop: "1px solid #1e1e1e" }}>
           <button onClick={onBack} style={{
@@ -262,123 +267,64 @@ export default function AccountsStep({
           </div>
         )}
 
-        {leads.map((lead, idx) => (
-          <div key={idx} style={{
-            background: lead.status === "accepted" ? "#0d1f17" : "#161616",
-            border: `1px solid ${lead.status === "rejected" ? "#f5454a" : lead.status === "accepted" ? "#3ecf8e" : "#2a2a2a"}`,
-            borderRadius: 10, padding: "18px 20px", marginBottom: 10,
-            opacity: lead.status === "rejected" ? 0.45 : 1,
-            display: "flex", alignItems: "flex-start", gap: 16,
-            animation: "fadeIn 0.3s ease",
-          }}>
-            {/* Icon */}
-            <div style={{
-              width: 40, height: 40, borderRadius: 10,
-              background: "#1e1e1e", border: "1px solid #2a2a2a",
-              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+        {/* Simplified lead cards */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {leads.map((lead, idx) => (
+            <div key={idx} style={{
+              background: lead.status === "accepted" ? "#0d1f17" : "#161616",
+              border: `1px solid ${lead.status === "rejected" ? "#4a2a2a" : lead.status === "accepted" ? "#2a4a37" : "#2a2a2a"}`,
+              borderRadius: 10, padding: "14px 16px",
+              opacity: lead.status === "rejected" ? 0.45 : 1,
+              display: "flex", alignItems: "center", gap: 14,
+              animation: "fadeIn 0.3s ease",
             }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.5">
-                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
-              </svg>
-            </div>
+              {/* Score badge */}
+              <ScoreBadge score={lead.fitScore} />
 
-            {/* Content */}
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-                <span style={{ fontSize: 15, fontWeight: 700, color: "#f0f0f0" }}>{lead.name}</span>
-                <ScoreBadge score={lead.fitScore} />
-              </div>
-              <p style={{ fontSize: 13, color: "#666", marginBottom: 8, lineHeight: 1.5 }}>{lead.summary}</p>
-              <a href={lead.url} target="_blank" rel="noopener" style={{ fontSize: 11, color: "#5b8af5", textDecoration: "none" }}>
-                {lead.url}
-              </a>
-              {lead.email && (
-                <div style={{ marginTop: 4 }}>
-                  <span style={{ fontSize: 11, color: "#3ecf8e" }}>✉ {lead.email}</span>
+              {/* Name + URL */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#f0f0f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {lead.name}
                 </div>
-              )}
+                <a href={lead.url} target="_blank" rel="noopener" style={{ fontSize: 11, color: "#666", textDecoration: "none" }}>
+                  {lead.url?.replace(/^https?:\/\//, "").slice(0, 40)}
+                </a>
+              </div>
 
               {/* Actions */}
               {lead.status === "pending" && (
-                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                  <button onClick={() => { handleAccept(idx); findContacts(lead, idx); }} style={{
-                    background: "#3ecf8e", color: "#0a0d14", border: "none",
-                    borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <button onClick={() => handleAccept(idx)} style={{
+                    background: "none", border: "1px solid #2a4a37", color: "#3ecf8e",
+                    borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
                   }}>
                     Accept
                   </button>
                   <button onClick={() => setRejectModal(idx)} style={{
-                    background: "#f5454a", color: "#fff", border: "none",
-                    borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    background: "none", border: "1px solid #4a2a2a", color: "#f5454a",
+                    borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
                   }}>
                     Reject
-                  </button>
-                  <button onClick={() => findContacts(lead, idx)} disabled={findingContacts === idx} style={{
-                    background: "#1c1c1c", color: "#f0f0f0", border: "1px solid #2a2a2a",
-                    borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer",
-                  }}>
-                    {findingContacts === idx ? "Finding..." : "Find Contacts"}
                   </button>
                 </div>
               )}
 
               {lead.status === "accepted" && (
-                <div style={{ marginTop: 12 }}>
-                  <button onClick={() => onSelectLead(lead)} style={{
-                    background: "#f0f0f0", color: "#0f0f0f", border: "none",
-                    borderRadius: 8, padding: "10px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer",
-                  }}>
-                    Generate Sales Kit →
-                  </button>
-                </div>
-              )}
-
-              {lead.status === "rejected" && lead.rejectionReason && (
-                <p style={{ fontSize: 11, color: "#f5454a", marginTop: 8 }}>
-                  Rejected: {lead.rejectionReason}
-                </p>
-              )}
-            </div>
-          </div>
-        ))}
-
-        {/* Contacts section */}
-        {contacts.length > 0 && (
-          <div style={{ marginTop: 24 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
-              KEY CONTACTS FOUND
-            </div>
-            {contacts.map((c, i) => (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", gap: 12,
-                padding: "10px 12px", background: "#1c1c1c",
-                border: "1px solid #2a2a2a", borderRadius: 8, marginBottom: 6,
-              }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: "50%",
-                  background: "linear-gradient(135deg, #5b8af5, #3ecf8e)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 13, fontWeight: 700, color: "#fff",
+                <button onClick={() => onSelectLead(lead)} style={{
+                  background: "#f0f0f0", color: "#0f0f0f", border: "none",
+                  borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                  flexShrink: 0,
                 }}>
-                  {c.name.charAt(0)}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#f0f0f0" }}>{c.name}</div>
-                  <div style={{ fontSize: 11, color: "#666" }}>{c.title}</div>
-                </div>
-                {c.linkedinUrl && (
-                  <a href={c.linkedinUrl} target="_blank" rel="noopener" style={{
-                    fontSize: 11, color: "#5b8af5", padding: "2px 8px",
-                    borderRadius: 4, background: "#1a2540", border: "1px solid #2a3f6a",
-                    textDecoration: "none",
-                  }}>
-                    LinkedIn
-                  </a>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+                  Generate Brief →
+                </button>
+              )}
+
+              {lead.status === "rejected" && (
+                <span style={{ fontSize: 11, color: "#f5454a", flexShrink: 0 }}>Rejected</span>
+              )}
+            </div>
+          ))}
+        </div>
 
         {/* Reject Modal */}
         {rejectModal !== null && (
@@ -437,14 +383,16 @@ function ScoreBadge({ score }: { score: number }) {
   const isHigh = score >= 4;
   const isMid = score === 3;
   return (
-    <span style={{
-      padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+    <div style={{
+      width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: 13, fontWeight: 700,
       background: isHigh ? "#1a2e24" : isMid ? "#2e2614" : "#2e1a1a",
       color: isHigh ? "#3ecf8e" : isMid ? "#f5a623" : "#f5454a",
       border: `1px solid ${isHigh ? "#2a4a37" : isMid ? "#4a3a1a" : "#4a2a2a"}`,
     }}>
-      {score}/5
-    </span>
+      {score}
+    </div>
   );
 }
 

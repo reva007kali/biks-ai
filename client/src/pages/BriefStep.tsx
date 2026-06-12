@@ -220,6 +220,19 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#f0f0f0" }}>{lead.name}</div>
           <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{lead.category} • {lead.city}</div>
+          {lead.url && (
+            <a href={lead.url} target="_blank" rel="noopener" style={{ fontSize: 10, color: "#5b8af5", textDecoration: "none", display: "block", marginTop: 4 }}>
+              {lead.url.replace(/^https?:\/\//, "").slice(0, 35)}
+            </a>
+          )}
+          {lead.email && (
+            <div style={{ fontSize: 10, color: "#3ecf8e", marginTop: 3 }}>✉ {lead.email}</div>
+          )}
+          {lead.summary && (
+            <div style={{ fontSize: 11, color: "#888", marginTop: 6, lineHeight: 1.4 }}>
+              {lead.summary.slice(0, 120)}{lead.summary.length > 120 ? "..." : ""}
+            </div>
+          )}
         </div>
 
         {/* Contacts */}

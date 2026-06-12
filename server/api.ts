@@ -332,7 +332,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
         "x-api-key": apiKey,
       },
       body: JSON.stringify({
-        query: city ? `${query} located in ${city}` : query,
+        query: city ? `${query} company based in ${city} ${city === 'Bali' ? 'Indonesia' : city === 'Jakarta' ? 'Indonesia' : city === 'Kuala Lumpur' ? 'Malaysia' : city === 'Bangkok' ? 'Thailand' : city === 'Ho Chi Minh City' ? 'Vietnam' : city === 'Manila' ? 'Philippines' : city === 'Hong Kong' ? 'China' : city === 'Tokyo' ? 'Japan' : city === 'Sydney' ? 'Australia' : city === 'Dubai' ? 'UAE' : ''}` : query,
         type: "auto",
         category: "company",
         numResults,
@@ -369,27 +369,27 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     if (city) {
       const cityLower = city.toLowerCase();
       const cityAliases: Record<string, string[]> = {
-        "singapore": ["singapore", "sg", ".sg"],
-        "jakarta": ["jakarta", "jkt", ".id", "indonesia"],
-        "bali": ["bali", ".id", "indonesia"],
-        "kuala lumpur": ["kuala lumpur", "kl", ".my", "malaysia"],
-        "bangkok": ["bangkok", "bkk", ".th", "thailand"],
-        "ho chi minh city": ["ho chi minh", "hcmc", "saigon", ".vn", "vietnam"],
-        "manila": ["manila", ".ph", "philippines"],
+        "singapore": ["singapore", ".sg", ".com.sg"],
+        "jakarta": ["jakarta", "jkt"],
+        "bali": ["bali", "denpasar", "seminyak", "ubud", "canggu", "kuta"],
+        "kuala lumpur": ["kuala lumpur", "kl", "petaling jaya"],
+        "bangkok": ["bangkok", "bkk", "sukhumvit"],
+        "ho chi minh city": ["ho chi minh", "hcmc", "saigon"],
+        "manila": ["manila", "makati", "bgc", "taguig"],
         "hong kong": ["hong kong", "hongkong", ".hk"],
-        "tokyo": ["tokyo", ".jp", "japan"],
-        "sydney": ["sydney", ".au", "australia"],
-        "dubai": ["dubai", ".ae", "uae"],
-        "london": ["london", ".uk", "united kingdom"],
-        "new york": ["new york", "nyc", "ny"],
+        "tokyo": ["tokyo", "shibuya", "shinjuku", "roppongi"],
+        "sydney": ["sydney", "nsw"],
+        "dubai": ["dubai", "uae", "abu dhabi"],
+        "london": ["london", ".co.uk"],
+        "new york": ["new york", "nyc", "manhattan", "brooklyn"],
       };
       const aliases = cityAliases[cityLower] || [cityLower];
       results = allResults.filter((r: any) => {
         const searchText = (r._fullText + " " + r.url + " " + r.title).toLowerCase();
         return aliases.some(alias => searchText.includes(alias));
       });
-      // If filtering removes all results, return unfiltered with a note
-      if (results.length === 0) results = allResults;
+      // If filtering removes all results, return empty - don't show irrelevant cities
+      // This ensures users only see results actually related to their selected city
     }
 
     // Remove internal _fullText field before returning

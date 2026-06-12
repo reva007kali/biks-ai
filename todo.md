@@ -101,3 +101,11 @@
 - [x] Adjust wizard flow: Hero → Dashboard (with memory) → Target Accounts → Sales Kit
 - [x] Navbar shows website URL + Reset button on right side
 - [x] Memory saved toast/notification on save
+
+## Bug Fixes & UI Improvements
+- [x] Fix active memory pills UI (gepeng/squished) in Target Accounts page
+- [x] Add delete memory function (×) in Dashboard memory chips
+- [x] Add delete memory function (×) in Target Accounts active memory pills
+- [x] Simplify lead cards - smaller, less detail (detail goes to Brief page)
+- [x] Remove Find Contact button from lead cards in Target Accounts
+- [x] Fix city filter - Exa search still showing Jakarta results regardless of city selection

@@ -50,6 +50,13 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
     setSaving(false);
   };
 
+  const deleteMemory = async (id: string) => {
+    try {
+      await fetch(`/api/mem0?id=${id}`, { method: "DELETE" });
+      setMemories(memories.filter(m => m.id !== id));
+    } catch {}
+  };
+
   return (
     <div style={{ minHeight: "calc(100vh - 57px)", display: "flex", flexDirection: "column", animation: "fadeIn 0.3s ease" }}>
       {/* Main content */}
@@ -159,11 +166,21 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
             {memories.map(m => (
               <span key={m.id} style={{
                 display: "inline-flex", alignItems: "center", gap: 6,
-                borderRadius: 20, padding: "4px 12px",
+                borderRadius: 20, padding: "5px 12px",
                 fontSize: 11, fontWeight: 500,
                 background: "#1a2e24", border: "1px solid #2a4a37", color: "#3ecf8e",
               }}>
                 {m.text}
+                <button
+                  onClick={() => deleteMemory(m.id)}
+                  style={{
+                    background: "none", border: "none", color: "#3ecf8e",
+                    cursor: "pointer", fontSize: 14, padding: "0 2px",
+                    opacity: 0.6, lineHeight: 1,
+                  }}
+                >
+                  ×
+                </button>
               </span>
             ))}
           </div>
