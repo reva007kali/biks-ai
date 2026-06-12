@@ -28,6 +28,32 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   const [kitEmailSent, setKitEmailSent] = useState(false);
   const [kitEmailError, setKitEmailError] = useState("");
   const [contactsLoading, setContactsLoading] = useState(true);
+  const [showEmailPreview, setShowEmailPreview] = useState(false);
+  const [emailPreviewHtml, setEmailPreviewHtml] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  const loadEmailPreview = async () => {
+    if (!salesKit || !business || !lead) return;
+    if (showEmailPreview) {
+      setShowEmailPreview(false);
+      return;
+    }
+    setPreviewLoading(true);
+    setShowEmailPreview(true);
+    try {
+      const res = await fetch("/api/preview-kit-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business, lead, salesKit, contacts }),
+      });
+      const data = await res.json();
+      setEmailPreviewHtml(data.html || "");
+    } catch {
+      setEmailPreviewHtml("<p style='color:#f5454a;padding:20px;'>Failed to load preview</p>");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!brief) generateBrief();
@@ -696,6 +722,53 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                         <div style={{ fontSize: 14, color: "#ccc", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
                           {salesKit.outreachEmailBody}
                         </div>
+                      </div>
+
+                      {/* Email Preview */}
+                      <div style={{ marginTop: 16, marginBottom: 16 }}>
+                        <button
+                          onClick={loadEmailPreview}
+                          disabled={previewLoading}
+                          style={{
+                            background: "none", border: "1px solid #2a2a2a",
+                            borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600,
+                            color: "#5b8af5", cursor: previewLoading ? "wait" : "pointer", fontFamily: "'Inter', sans-serif",
+                            width: "100%", textAlign: "left",
+                            display: "flex", alignItems: "center", justifyContent: "space-between",
+                          }}
+                        >
+                          <span>{previewLoading ? "⏳ Loading..." : `👁 ${showEmailPreview ? "Hide" : "Preview"} Email`}</span>
+                          <span style={{ fontSize: 11, color: "#666" }}>{showEmailPreview ? "▲" : "▼"}</span>
+                        </button>
+                        {showEmailPreview && (
+                          <div style={{
+                            marginTop: 12, border: "1px solid #2a2a2a", borderRadius: 10,
+                            overflow: "hidden", background: "#0f0f0f",
+                          }}>
+                            <div style={{
+                              padding: "8px 14px", background: "#1a1a1a", borderBottom: "1px solid #2a2a2a",
+                              display: "flex", alignItems: "center", justifyContent: "space-between",
+                            }}>
+                              <span style={{ fontSize: 11, color: "#666", fontWeight: 600 }}>EMAIL PREVIEW</span>
+                              <span style={{ fontSize: 11, color: "#555" }}>To: {emailTo}</span>
+                            </div>
+                            {previewLoading ? (
+                              <div style={{ padding: 40, textAlign: "center" }}>
+                                <div style={{ width: 24, height: 24, border: "2px solid #333", borderTopColor: "#5b8af5", borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto" }} />
+                              </div>
+                            ) : (
+                              <iframe
+                                srcDoc={emailPreviewHtml}
+                                style={{
+                                  width: "100%", height: 500, border: "none",
+                                  background: "#0f0f0f",
+                                }}
+                                sandbox="allow-same-origin"
+                                title="Email Preview"
+                              />
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {/* Send Kit Email */}

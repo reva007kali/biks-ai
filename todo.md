@@ -129,3 +129,8 @@
 - [x] Marketing Kit: send as native email with modern design directly in body
 - [x] Marketing Kit email: dynamic data from selected company (not hardcoded)
 - [x] Marketing Kit email: modern dark-themed design matching Biks.ai aesthetic
+
+## Marketing Kit Email Preview
+- [x] Add email preview in Marketing Kit tab before sending
+- [x] Render the native HTML email in an iframe so user can review
+- [x] Preview shows exactly what will be sent via Resend

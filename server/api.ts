@@ -831,23 +831,9 @@ api.post("/api/send-email", async (req: Request, res: Response) => {
 });
 
 // ============================================================
-// POST /api/send-kit-email — Send native HTML marketing email via Resend
+// Shared HTML email builder
 // ============================================================
-api.post("/api/send-kit-email", async (req: Request, res: Response) => {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ ok: false, error: "Resend not configured" });
-  }
-
-  const { business, lead, salesKit, contacts } = req.body;
-  if (!business || !lead || !salesKit) {
-    return res.status(400).json({ ok: false, error: "business, lead, and salesKit are required" });
-  }
-
-  const to = "ngurah.linggih@gmail.com";
-  const subject = salesKit.outreachEmailSubject || `${business.companyName} × ${lead.name} — Partnership Opportunity`;
-
-  // Build native HTML email with Biks.ai dark theme
+function buildKitEmailHtml(business: any, lead: any, salesKit: any, contacts: any[]) {
   const synergiesHtml = (salesKit.synergies || []).map((s: any) => `
     <tr>
       <td style="padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:13px;color:#e0e0e0;">${s.sellerProduct}</td>
@@ -864,16 +850,14 @@ api.post("/api/send-kit-email", async (req: Request, res: Response) => {
           <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#5b8af5,#3ecf8e);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;">${(c.name || "?").charAt(0)}</div>
           <div>
             <div style="font-size:13px;color:#f0f0f0;font-weight:500;">${c.name}</div>
-            <div style="font-size:11px;color:#666;">${c.title}${c.linkedinUrl ? ` · <a href="${c.linkedinUrl}" style="color:#5b8af5;text-decoration:none;">LinkedIn</a>` : ''}</div>
+            <div style="font-size:11px;color:#666;">${c.title}${c.linkedinUrl ? ` \u00b7 <a href="${c.linkedinUrl}" style="color:#5b8af5;text-decoration:none;">LinkedIn</a>` : ''}</div>
           </div>
         </div>
       `).join("")}
     </div>
   ` : "";
 
-  // No one-pager URL - email is fully native HTML
-
-  const htmlBody = `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#0f0f0f;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
@@ -891,8 +875,8 @@ api.post("/api/send-kit-email", async (req: Request, res: Response) => {
   <!-- Hero -->
   <div style="padding:40px 32px;text-align:center;background:linear-gradient(180deg,#111 0%,#0f0f0f 100%);">
     <div style="font-size:11px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#5b8af5;margin-bottom:12px;">PARTNERSHIP OPPORTUNITY</div>
-    <h1 style="font-size:24px;font-weight:700;color:#f0f0f0;margin:0 0 8px;line-height:1.3;">${business.companyName} × ${lead.name}</h1>
-    <p style="font-size:14px;color:#888;margin:0;">${lead.category || ''} ${lead.city ? '· ' + lead.city : ''}</p>
+    <h1 style="font-size:24px;font-weight:700;color:#f0f0f0;margin:0 0 8px;line-height:1.3;">${business.companyName} \u00d7 ${lead.name}</h1>
+    <p style="font-size:14px;color:#888;margin:0;">${lead.category || ''} ${lead.city ? '\u00b7 ' + lead.city : ''}</p>
   </div>
 
   <!-- Outreach Message -->
@@ -932,18 +916,50 @@ api.post("/api/send-kit-email", async (req: Request, res: Response) => {
     <div style="background:linear-gradient(135deg,#5b8af5,#3ecf8e);border-radius:10px;padding:32px;">
       <h3 style="font-size:18px;font-weight:700;color:#fff;margin:0 0 12px;">Let's Explore This Together</h3>
       <p style="font-size:13px;color:rgba(255,255,255,0.8);margin:0 0 20px;">${salesKit.suggestedAngle}</p>
-      <a href="${business.website || '#'}" style="display:inline-block;background:#fff;color:#0f0f0f;font-size:13px;font-weight:700;padding:12px 28px;border-radius:6px;text-decoration:none;">Schedule a Call →</a>
+      <a href="${business.website || '#'}" style="display:inline-block;background:#fff;color:#0f0f0f;font-size:13px;font-weight:700;padding:12px 28px;border-radius:6px;text-decoration:none;">Schedule a Call \u2192</a>
     </div>
   </div>
 
   <!-- Footer -->
   <div style="padding:24px 32px;border-top:1px solid #1e1e1e;text-align:center;">
-    <p style="font-size:11px;color:#555;margin:0;">Sent via <span style="color:#f0f0f0;font-weight:600;">Biks.ai</span> — AI-powered sales intelligence</p>
-    <p style="font-size:10px;color:#333;margin:8px 0 0;">From ${business.companyName} • ${business.website || ''}</p>
+    <p style="font-size:11px;color:#555;margin:0;">Sent via <span style="color:#f0f0f0;font-weight:600;">Biks.ai</span> \u2014 AI-powered sales intelligence</p>
+    <p style="font-size:10px;color:#333;margin:8px 0 0;">From ${business.companyName} \u2022 ${business.website || ''}</p>
   </div>
 </div>
 </body>
 </html>`;
+}
+
+// ============================================================
+// POST /api/preview-kit-email — Return the exact HTML that would be sent
+// ============================================================
+api.post("/api/preview-kit-email", async (req: Request, res: Response) => {
+  const { business, lead, salesKit, contacts } = req.body;
+  if (!business || !lead || !salesKit) {
+    return res.status(400).json({ error: "business, lead, and salesKit are required" });
+  }
+  const html = buildKitEmailHtml(business, lead, salesKit, contacts || []);
+  return res.json({ html });
+});
+
+// ============================================================
+// POST /api/send-kit-email — Send native HTML marketing email via Resend
+// ============================================================
+api.post("/api/send-kit-email", async (req: Request, res: Response) => {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, error: "Resend not configured" });
+  }
+
+  const { business, lead, salesKit, contacts } = req.body;
+  if (!business || !lead || !salesKit) {
+    return res.status(400).json({ ok: false, error: "business, lead, and salesKit are required" });
+  }
+
+  const to = "ngurah.linggih@gmail.com";
+  const subject = salesKit.outreachEmailSubject || `${business.companyName} \u00d7 ${lead.name} — Partnership Opportunity`;
+
+  const htmlBody = buildKitEmailHtml(business, lead, salesKit, contacts || []);
 
   try {
     const resendRes = await fetch("https://api.resend.com/emails", {
