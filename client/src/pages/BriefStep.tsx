@@ -27,6 +27,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   const [kitEmailSending, setKitEmailSending] = useState(false);
   const [kitEmailSent, setKitEmailSent] = useState(false);
   const [kitEmailError, setKitEmailError] = useState("");
+  const [contactsLoading, setContactsLoading] = useState(true);
 
   useEffect(() => {
     if (!brief) generateBrief();
@@ -35,6 +36,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   }, [lead.name]);
 
   const fetchContacts = async () => {
+    setContactsLoading(true);
     try {
       const res = await fetch("/api/find-contacts", {
         method: "POST",
@@ -46,6 +48,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         setContacts(data.contacts);
       }
     } catch {}
+    setContactsLoading(false);
   };
 
   const generateBrief = async () => {
@@ -394,7 +397,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                         </div>
                       ))}
                     </div>
-                  ) : (
+                  ) : contactsLoading ? (
                     <div style={{
                       background: "#1c1c1c", border: "1px solid #2a2a2a",
                       borderRadius: 8, padding: "20px", textAlign: "center",
@@ -406,6 +409,13 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                         animation: "spin 1s linear infinite",
                         margin: "10px auto 0",
                       }} />
+                    </div>
+                  ) : (
+                    <div style={{
+                      background: "#1c1c1c", border: "1px solid #2a2a2a",
+                      borderRadius: 8, padding: "20px", textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 13, color: "#555" }}>No decision makers found for this company</div>
                     </div>
                   )}
                 </div>
