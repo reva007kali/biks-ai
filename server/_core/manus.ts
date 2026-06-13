@@ -39,7 +39,7 @@ export async function manusTask<T>(
   schema: Record<string, unknown>,
   options: ManusTaskOptions = {}
 ): Promise<T> {
-  const { timeoutMs = 180_000, pollMs = 3_000, onProgress } = options;
+  const { timeoutMs = 180_000, pollMs = 2_500, onProgress } = options;
 
   const apiKey = process.env.MANUS_API_KEY;
   if (!apiKey) throw new Error("MANUS_API_KEY is not configured");
@@ -51,22 +51,32 @@ export async function manusTask<T>(
 
   onProgress?.("Creating Manus task...", "Initializing AI agent", 22);
 
-  const createRes = await fetch(`${BASE}/task.create`, {
-    method: "POST",
-    headers: hdrs,
-    body: JSON.stringify({
-      message: { content: prompt },
-      structured_output_schema: schema,
-    }),
+  // task.create can fail transiently under concurrent load, so retry with backoff.
+  const createBody = JSON.stringify({
+    message: { content: prompt },
+    structured_output_schema: schema,
   });
-
-  if (!createRes.ok) {
-    const txt = await createRes.text().catch(() => "");
-    throw new Error(`Manus task.create failed (${createRes.status}): ${txt}`);
+  let created: any = null;
+  let lastErr = "task.create error";
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const createRes = await fetch(`${BASE}/task.create`, { method: "POST", headers: hdrs, body: createBody });
+      if (createRes.ok) {
+        const j: any = await createRes.json().catch(() => null);
+        if (j?.ok) { created = j; break; }
+        lastErr = j?.error?.message ?? "task.create error";
+      } else {
+        lastErr = `${createRes.status}: ${await createRes.text().catch(() => "")}`;
+      }
+    } catch (e: any) {
+      lastErr = `network: ${e?.message ?? e}`;
+    }
+    if (attempt < 3) {
+      const rateLimited = /\b429\b|resource_exhausted/i.test(lastErr);
+      await new Promise(r => setTimeout(r, rateLimited ? 6000 : 1500 * (attempt + 1)));
+    }
   }
-
-  const created: any = await createRes.json();
-  if (!created.ok) throw new Error(`Manus: ${created.error?.message ?? "task.create error"}`);
+  if (!created) throw new Error(`Manus task.create failed after retries (${lastErr})`);
 
   const taskId: string = created.task_id;
   onProgress?.("Agent started", "Manus is processing your request", 30);
@@ -84,13 +94,25 @@ export async function manusTask<T>(
     // Task not registered yet — retry silently
     if (pollRes.status === 404) continue;
 
+    // Rate limited or transient server error — back off and keep polling.
+    if (pollRes.status === 429 || pollRes.status >= 500) {
+      await new Promise(r => setTimeout(r, Math.min(6_000, pollMs * 2)));
+      continue;
+    }
+
     if (!pollRes.ok) {
       const txt = await pollRes.text().catch(() => "");
       throw new Error(`Manus poll failed (${pollRes.status}): ${txt}`);
     }
 
     const poll: any = await pollRes.json();
-    if (!poll.ok) throw new Error(`Manus poll error: ${poll.error?.message}`);
+    if (!poll.ok) {
+      if (poll.error?.code === "resource_exhausted") {
+        await new Promise(r => setTimeout(r, Math.min(10_000, pollMs * 4)));
+        continue;
+      }
+      throw new Error(`Manus poll error: ${poll.error?.message}`);
+    }
 
     const msgs: any[] = poll.messages ?? [];
     const statusEvent = msgs.find(m => m.type === "status_update");

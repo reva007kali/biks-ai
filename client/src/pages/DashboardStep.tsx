@@ -68,99 +68,142 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           {/* Company Summary */}
           <div style={{
-            background: "#161616", border: "1px solid #2a2a2a", borderRadius: 14,
+            background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-xl)",
             padding: "28px 28px 32px", minHeight: 220,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
                 <path d="M7 7h10M7 12h10M7 17h6" />
               </svg>
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f0f0f0", margin: 0 }}>Company Summary</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)", margin: 0 }}>Company Summary</h3>
             </div>
-            <p style={{ fontSize: 14, color: "#999", lineHeight: 1.7, margin: 0 }}>{business.summary}</p>
+            <p style={{ fontSize: 14, color: "var(--ink-3)", lineHeight: 1.7, margin: 0 }}>{business.summary}</p>
           </div>
 
           {/* Core Value Proposition */}
           <div style={{
-            background: "#161616", border: "1px solid #2a2a2a", borderRadius: 14,
+            background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-xl)",
             padding: "28px 28px 32px", minHeight: 220,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2L2 7l10 5 10-5-10-5z" />
                 <path d="M2 17l10 5 10-5" />
                 <path d="M2 12l10 5 10-5" />
               </svg>
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f0f0f0", margin: 0 }}>Core Value Proposition</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)", margin: 0 }}>Core Value Proposition</h3>
             </div>
-            <p style={{ fontSize: 14, color: "#999", lineHeight: 1.7, margin: 0 }}>{business.valueProposition}</p>
+            {business.valuePropositions && business.valuePropositions.length > 0 ? (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+                {business.valuePropositions.slice(0, 3).map((vp, i) => (
+                  <li key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    <span style={{ color: "var(--sage)", fontSize: 14, lineHeight: 1.6, flexShrink: 0 }}>•</span>
+                    <span style={{ fontSize: 14, color: "var(--ink-3)", lineHeight: 1.6 }}>
+                      <span style={{ color: "var(--ink)", fontWeight: 600 }}>{vp.valueLabel}:</span> {vp.valueCopy}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+                {business.valueProposition.split(/(?:\n|(?<=\.)\s+(?=[A-Z]))/).map(s => s.trim()).filter(Boolean).slice(0, 3).map((s, i) => (
+                  <li key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    <span style={{ color: "var(--sage)", fontSize: 14, lineHeight: 1.6, flexShrink: 0 }}>•</span>
+                    <span style={{ fontSize: 14, color: "var(--ink-3)", lineHeight: 1.6 }}>{s}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Current Customer Segments */}
           <div style={{
-            background: "#161616", border: "1px solid #2a2a2a", borderRadius: 14,
+            background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-xl)",
             padding: "28px 28px 32px", minHeight: 220,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                 <circle cx="9" cy="7" r="4" />
                 <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
                 <path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f0f0f0", margin: 0 }}>Current Customer Segments</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)", margin: 0 }}>Current Customer Segments</h3>
             </div>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {business.currentSegments.map((s, i) => (
-                <li key={i} style={{
-                  fontSize: 14, color: "#999", padding: "8px 0",
-                  display: "flex", alignItems: "center", gap: 10,
-                }}>
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#555", flexShrink: 0 }} />
-                  {s}
-                </li>
-              ))}
-            </ul>
+            {business.customerSegments && business.customerSegments.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {business.customerSegments.slice(0, 4).map((seg, i) => (
+                  <div key={i}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginBottom: 2 }}>{seg.segmentLabel}</div>
+                    <div style={{ fontSize: 13, color: "var(--ink-3)", lineHeight: 1.5 }}>
+                      {seg.clientNames && seg.clientNames.length > 0
+                        ? seg.clientNames.join(", ")
+                        : (seg.segmentDescription || "No named clientele found on website.")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {business.currentSegments.map((s, i) => (
+                  <li key={i} style={{
+                    fontSize: 14, color: "var(--ink-3)", padding: "8px 0",
+                    display: "flex", alignItems: "center", gap: 10,
+                  }}>
+                    <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--ink-3)", flexShrink: 0 }} />
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* New Business Opportunities */}
           <div style={{
-            background: "#161616", border: "1px solid #2a2a2a", borderRadius: 14,
+            background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-xl)",
             padding: "28px 28px 32px", minHeight: 220,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
               </svg>
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f0f0f0", margin: 0 }}>New Business Opportunities</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)", margin: 0 }}>New Business Opportunities</h3>
             </div>
-            <p style={{ fontSize: 12, color: "#666", marginBottom: 16, marginLeft: 30 }}>
-              Select one opportunity to generate target accounts
+            <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 16, marginLeft: 30 }}>
+              Review possible markets, then generate leads.
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {business.expansionCategories.map((cat, i) => (
-                <button
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {business.expansionCategories.slice(0, 3).map((cat, i) => (
+                <div
                   key={i}
-                  onClick={() => onSelectCategory(i)}
                   style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    width: "100%", textAlign: "left",
                     padding: "12px 14px",
-                    background: "#1c1c1c", border: "1px solid #2a2a2a",
-                    borderRadius: 8, cursor: "pointer",
-                    transition: "border-color 0.15s ease, background 0.15s ease",
-                    fontFamily: "'Inter', sans-serif",
+                    background: "var(--surface-2)", border: "1px solid var(--line)",
+                    borderRadius: "var(--radius-md)",
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#3a3a3a"; e.currentTarget.style.background = "#222"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#2a2a2a"; e.currentTarget.style.background = "#1c1c1c"; }}
                 >
-                  <span style={{ fontSize: 14, color: "#ccc", fontWeight: 400 }}>{cat.name}</span>
-                  <span style={{ color: "#555", fontSize: 16 }}>→</span>
-                </button>
+                  <div style={{ fontSize: 14, color: "var(--ink)", fontWeight: 600, marginBottom: 2 }}>{cat.name}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>{cat.whyRelevant}</div>
+                </div>
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Primary CTA — market selection happens on the Leads page */}
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 24 }}>
+          <button
+            onClick={() => onSelectCategory(0)}
+            style={{
+              background: "var(--action)", color: "var(--action-fg)",
+              border: "none", borderRadius: "var(--radius-md)",
+              padding: "13px 32px", fontSize: 15, fontWeight: 600,
+              cursor: "pointer", fontFamily: "var(--font-sans)",
+            }}
+          >
+            Generate Leads →
+          </button>
         </div>
 
         {/* Memory chips display */}
@@ -171,16 +214,16 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
                 display: "inline-flex", alignItems: "center", gap: 6,
                 borderRadius: 20, padding: "5px 12px",
                 fontSize: 11, fontWeight: 500,
-                background: "#1a2e24", border: "1px solid #2a4a37", color: "#3ecf8e",
+                background: "var(--success-wash)", border: "1px solid var(--success)", color: "var(--success)",
                 opacity: deletingId === m.id ? 0.5 : 1,
                 transition: "opacity 0.2s ease",
               }}>
-                {m.text}
+                Saved: {m.text}
                 <button
                   onClick={() => deleteMemory(m.id)}
                   disabled={deletingId === m.id}
                   style={{
-                    background: "none", border: "none", color: "#3ecf8e",
+                    background: "none", border: "none", color: "var(--success)",
                     cursor: deletingId === m.id ? "not-allowed" : "pointer",
                     fontSize: 14, padding: "0 2px",
                     opacity: 0.6, lineHeight: 1,
@@ -190,8 +233,8 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
                   {deletingId === m.id ? (
                     <span style={{
                       display: "inline-block", width: 10, height: 10,
-                      border: "1.5px solid rgba(62,207,142,0.3)",
-                      borderTopColor: "#3ecf8e", borderRadius: "50%",
+                      border: "1.5px solid var(--line-strong)",
+                      borderTopColor: "var(--sage)", borderRadius: "50%",
                       animation: "spin 0.6s linear infinite",
                     }} />
                   ) : "×"}
@@ -205,7 +248,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
       {/* Sticky bottom memory bar */}
       <div style={{
         position: "fixed", bottom: 0, left: 0, right: 0,
-        background: "#161616", borderTop: "1px solid #2a2a2a",
+        background: "var(--surface)", borderTop: "1px solid var(--line)",
         padding: "16px 32px",
         display: "flex", alignItems: "center", gap: 16,
         zIndex: 100,
@@ -213,16 +256,16 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <div style={{
             width: 36, height: 36, borderRadius: "50%",
-            background: "#2a2a2a", display: "flex", alignItems: "center", justifyContent: "center",
+            background: "var(--sage)", display: "flex", alignItems: "center", justifyContent: "center",
           }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f0f0f0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
           </div>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#f0f0f0" }}>Add Business Context to Memory</div>
-            <div style={{ fontSize: 12, color: "#666" }}>Optional: add preferences, ICP notes, past customers, excluded segments, or sales context</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>Add Business Context</div>
+            <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Tell Biks what to remember about your company for lead search and sales material.</div>
           </div>
         </div>
 
@@ -231,29 +274,29 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
             value={memoryInput}
             onChange={(e) => setMemoryInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !saving) addMemory(); }}
-            placeholder="e.g. Prefer premium wellness operators; avoid small studios without water facilities"
+            placeholder="e.g. Prioritize premium wellness operators; avoid small studios without visible water facilities"
             style={{
               flex: 1,
-              background: "#1c1c1c", border: "1px solid #2a2a2a",
-              borderRadius: 8, padding: "11px 14px",
-              fontSize: 13, color: "#f0f0f0", outline: "none",
-              fontFamily: "'Inter', sans-serif",
+              background: "var(--surface-2)", border: "1px solid var(--line)",
+              borderRadius: "var(--radius-md)", padding: "11px 14px",
+              fontSize: 13, color: "var(--ink)", outline: "none",
+              fontFamily: "var(--font-sans)",
             }}
           />
           <button
             onClick={addMemory}
             disabled={saving || !memoryInput.trim()}
             style={{
-              background: "#f0f0f0", color: "#0f0f0f",
-              border: "none", borderRadius: 8,
+              background: "var(--action)", color: "var(--action-fg)",
+              border: "none", borderRadius: "var(--radius-md)",
               padding: "10px 20px", fontSize: 14, fontWeight: 600,
               cursor: saving ? "not-allowed" : "pointer",
               opacity: saving || !memoryInput.trim() ? 0.5 : 1,
-              fontFamily: "'Inter', sans-serif",
+              fontFamily: "var(--font-sans)",
               whiteSpace: "nowrap",
             }}
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? "Saving..." : "Save to Memory"}
           </button>
         </div>
 
@@ -261,12 +304,12 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
         {savedMsg && (
           <div style={{
             position: "absolute", top: -40, right: 32,
-            background: "#1a2e24", border: "1px solid #2a4a37",
+            background: "var(--success-wash)", border: "1px solid var(--success)",
             borderRadius: 20, padding: "6px 14px",
-            fontSize: 12, color: "#3ecf8e",
+            fontSize: 12, color: "var(--success)",
             animation: "fadeIn 0.2s ease",
           }}>
-            Memory saved: {savedMsg.length > 30 ? savedMsg.slice(0, 30) + "..." : savedMsg}
+            Saved to memory.
           </div>
         )}
       </div>

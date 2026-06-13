@@ -2,18 +2,20 @@ import React from "react";
 
 interface NavbarProps {
   currentStep: number;
+  maxStepReached: number;
+  canNavigateToStep: (step: number) => boolean;
   onStepClick: (step: number) => void;
   onReset: () => void;
   website: string;
 }
 
 const steps = [
-  { num: 2, label: "Analysis" },
-  { num: 3, label: "Accounts" },
-  { num: 4, label: "Brief" },
+  { num: 2, label: "Company Analysis" },
+  { num: 3, label: "Leads" },
+  { num: 4, label: "Marketing Kit" },
 ];
 
-export default function Navbar({ currentStep, onStepClick, onReset, website }: NavbarProps) {
+export default function Navbar({ currentStep, maxStepReached, canNavigateToStep, onStepClick, onReset, website }: NavbarProps) {
   const domain = website ? website.replace(/^https?:\/\//, "").replace(/\/$/, "") : "";
 
   return (
@@ -22,18 +24,18 @@ export default function Navbar({ currentStep, onStepClick, onReset, website }: N
       gridTemplateColumns: "1fr auto 1fr",
       alignItems: "center",
       padding: "18px 32px",
-      borderBottom: "1px solid #1e1e1e",
-      background: "#0f0f0f",
+      borderBottom: "1px solid var(--line)",
+      background: "var(--bg)",
     }}>
       {/* Logo */}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3, width: 18, height: 18 }}>
-          <span style={{ background: "#f0f0f0", borderRadius: 1, display: "block" }} />
-          <span style={{ background: "#f0f0f0", borderRadius: 1, display: "block" }} />
-          <span style={{ background: "#f0f0f0", borderRadius: 1, display: "block" }} />
-          <span style={{ background: "#f0f0f0", borderRadius: 1, display: "block" }} />
+          <span style={{ background: "var(--ink)", borderRadius: 1, display: "block" }} />
+          <span style={{ background: "var(--ink)", borderRadius: 1, display: "block" }} />
+          <span style={{ background: "var(--ink)", borderRadius: 1, display: "block" }} />
+          <span style={{ background: "var(--ink)", borderRadius: 1, display: "block" }} />
         </div>
-        <span style={{ fontFamily: "'DM Serif Display', serif", fontWeight: 700, fontSize: 16, color: "#f0f0f0" }}>
+        <span style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 16, color: "var(--ink)" }}>
           Biks.ai
         </span>
       </div>
@@ -43,19 +45,23 @@ export default function Navbar({ currentStep, onStepClick, onReset, website }: N
         {steps.map((s, i) => {
           const isDone = currentStep > s.num;
           const isActive = currentStep === s.num;
-          const isPending = currentStep < s.num;
+          const isPending = currentStep < s.num && s.num > maxStepReached;
+          const isClickable = canNavigateToStep(s.num);
 
           return (
             <React.Fragment key={s.num}>
-              {i > 0 && <span style={{ color: "#2a2a2a", fontSize: 12 }}>—</span>}
+              {i > 0 && <span style={{ color: "var(--line)", fontSize: 12 }}>—</span>}
               <div
-                onClick={() => { if (isDone) onStepClick(s.num); }}
+                onClick={() => { if (isClickable) onStepClick(s.num); }}
+                onMouseEnter={(e) => { if (isClickable && !isActive) e.currentTarget.style.opacity = "0.7"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = isPending ? "0.4" : "1"; }}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
-                  cursor: isDone ? "pointer" : "default",
+                  cursor: isClickable ? "pointer" : "default",
                   opacity: isPending ? 0.4 : 1,
+                  transition: "opacity 0.15s",
                 }}
               >
                 <span style={{
@@ -67,16 +73,16 @@ export default function Navbar({ currentStep, onStepClick, onReset, website }: N
                   justifyContent: "center",
                   fontSize: 11,
                   fontWeight: 600,
-                  background: isActive ? "#f0f0f0" : isDone ? "#2a2a2a" : "transparent",
-                  color: isActive ? "#0f0f0f" : isDone ? "#555" : "#333",
-                  border: isActive ? "none" : "1px solid #2a2a2a",
+                  background: isActive ? "var(--action)" : isDone ? "var(--surface-sunk)" : "transparent",
+                  color: isActive ? "var(--action-fg)" : isDone ? "var(--ink-3)" : "var(--ink-3)",
+                  border: isActive ? "none" : "1px solid var(--line)",
                 }}>
                   {isDone ? "✓" : s.num - 1}
                 </span>
                 <span style={{
                   fontSize: 13,
                   fontWeight: isActive ? 500 : 400,
-                  color: isActive ? "#f0f0f0" : isDone ? "#888" : "#333",
+                  color: isActive ? "var(--ink)" : isDone ? "var(--ink-3)" : "var(--ink-3)",
                 }}>
                   {s.label}
                 </span>
@@ -89,7 +95,7 @@ export default function Navbar({ currentStep, onStepClick, onReset, website }: N
       {/* Right: domain + reset */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12 }}>
         {domain && (
-          <span style={{ fontSize: 12, color: "#666" }}>{domain}</span>
+          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{domain}</span>
         )}
         <button
           onClick={onReset}
@@ -99,9 +105,9 @@ export default function Navbar({ currentStep, onStepClick, onReset, website }: N
             padding: "6px 0",
             fontSize: 13,
             fontWeight: 500,
-            color: "#888",
+            color: "var(--ink-3)",
             cursor: "pointer",
-            fontFamily: "'Inter', sans-serif",
+            fontFamily: "var(--font-sans)",
           }}
         >
           Reset

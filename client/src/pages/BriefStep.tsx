@@ -20,14 +20,21 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   const [tab, setTab] = useState<"account" | "email" | "meeting" | "kit">("account");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ pct: 0, message: "", detail: "" });
-  const emailTo = "ngurah.linggih@gmail.com";
+  // Recipient is editable: defaults to the prospect's email, but the user can type,
+  // override, or add a new address before sending.
+  const [emailTo, setEmailTo] = useState(lead.email || "");
+  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTo.trim());
+  const hasEmail = isValidEmail;
+  const emailToDisplay = emailTo.trim() || "No recipient set";
   const [emailSending, setEmailSending] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [kitLoading, setKitLoading] = useState(false);
   const [kitProgress, setKitProgress] = useState({ pct: 0, message: "", detail: "" });
+  const [kitError, setKitError] = useState("");
   const [kitEmailSending, setKitEmailSending] = useState(false);
   const [kitEmailSent, setKitEmailSent] = useState(false);
+  const [kitSentTo, setKitSentTo] = useState("");
   const [kitEmailError, setKitEmailError] = useState("");
   const [contactsLoading, setContactsLoading] = useState(true);
   const [reviewsLoading, setReviewsLoading] = useState(false);
@@ -60,11 +67,17 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   };
 
   useEffect(() => {
-    if (!brief) generateBrief();
-    // Always fetch contacts for the current lead
+    // Reset the editable recipient to this lead's email
+    setEmailTo(lead.email || "");
+    // Contacts use Exa (not Manus), so fire immediately.
     fetchContacts();
-    // Fetch reviews for the current lead
-    fetchReviews();
+    // The Account Brief is the default view, so generate it first.
+    if (!brief) generateBrief();
+    // Stagger the remaining Manus calls so the marketing kit + review analysis don't
+    // all hit task.create at the same instant as the brief (avoids Manus rate limits).
+    const tReviews = setTimeout(() => fetchReviews(), 2000);
+    const tKit = setTimeout(() => { if (!salesKit && !kitLoading) generateSalesKit(); }, 4000);
+    return () => { clearTimeout(tReviews); clearTimeout(tKit); };
   }, [lead.name]);
 
   const fetchContacts = async () => {
@@ -73,18 +86,20 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
       const res = await fetch("/api/find-contacts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadName: lead.name, city: lead.city }),
+        body: JSON.stringify({ leadName: lead.name, city: lead.city, leadUrl: lead.url }),
       });
       const data = await res.json();
-      if (data.contacts && data.contacts.length > 0) {
-        setContacts(data.contacts);
-      }
-    } catch {}
+      // Always reflect the latest result — including an empty list — so stale/wrong
+      // contacts from a previous lead don't linger when verification returns none.
+      setContacts(Array.isArray(data.contacts) ? data.contacts : []);
+    } catch {
+      setContacts([]);
+    }
     setContactsLoading(false);
   };
 
   const fetchReviews = async () => {
-    if (reviewAnalysis) return;
+    if (reviewAnalysis) return; // Already fetched
     setReviewsLoading(true);
     setReviewsError("");
     try {
@@ -131,7 +146,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 
   const generateBrief = async () => {
     setLoading(true);
-    setProgress({ pct: 10, message: "Starting...", detail: "" });
+    setProgress({ pct: 0, message: "Starting...", detail: "" });
 
     try {
       const res = await fetch("/api/generate-brief", {
@@ -162,38 +177,66 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     setLoading(false);
   };
 
+  const MAX_KIT_ATTEMPTS = 3;
+
+  // Runs one generation attempt. Returns true on success, false on any failure
+  // (server error event, dropped stream, or network error) so the caller can retry.
+  const runSalesKitAttempt = async (): Promise<boolean> => {
+    const res = await fetch("/api/generate-sales-kit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        business,
+        lead: { name: lead.name, url: lead.url, summary: lead.summary, category: lead.category, city: lead.city },
+        memories: memories.map(m => m.text),
+        reviewPainPoints: reviewAnalysis?.painPoints || [],
+      }),
+    });
+
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (data.error) return false;
+    const { taskId } = data;
+
+    setKitProgress({ pct: 30, message: "Generating sales kit...", detail: "AI analyzing synergies" });
+
+    const startTime = Date.now();
+    while (true) {
+      if (Date.now() - startTime > 180_000) return false;
+      await new Promise(r => setTimeout(r, 3000));
+      const pollRes = await fetch(`/api/poll-task?id=${taskId}`);
+      const status = await pollRes.json();
+      if (status.status === "done") { setSalesKit(status.result); return true; }
+      if (status.status === "error") return false;
+      setKitProgress({ pct: status.pct || 50, message: status.message || "Processing...", detail: status.detail || "" });
+    }
+  };
+
+  // Generate the kit, auto-retrying transient failures so it succeeds without the
+  // user pressing anything. Only after all attempts fail do we surface a retry.
   const generateSalesKit = async () => {
     setKitLoading(true);
-    setKitProgress({ pct: 10, message: "Starting sales kit...", detail: "" });
+    setKitError("");
+    setKitProgress({ pct: 0, message: "Starting marketing kit...", detail: "" });
 
-    try {
-      const res = await fetch("/api/generate-sales-kit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          business,
-          lead: { name: lead.name, url: lead.url, summary: lead.summary, category: lead.category, city: lead.city },
-          memories: memories.map(m => m.text),
-          reviewPainPoints: reviewAnalysis?.painPoints || [],
-        }),
-      });
-
-      if (!res.ok) { setKitLoading(false); return; }
-      const { taskId } = await res.json();
-      setKitProgress({ pct: 30, message: "Generating sales kit...", detail: "AI analyzing synergies" });
-
-      const startTime = Date.now();
-      while (true) {
-        if (Date.now() - startTime > 180_000) { setKitLoading(false); break; }
-        await new Promise(r => setTimeout(r, 3000));
-        const pollRes = await fetch(`/api/poll-task?id=${taskId}`);
-        const status = await pollRes.json();
-        if (status.status === "done") { setSalesKit(status.result); setKitLoading(false); return; }
-        if (status.status === "error") { setKitLoading(false); break; }
-        setKitProgress({ pct: status.pct || 50, message: status.message || "Processing...", detail: status.detail || "" });
+    for (let attempt = 0; attempt < MAX_KIT_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        setKitProgress({ pct: 10, message: "Retrying…", detail: `Attempt ${attempt + 1} of ${MAX_KIT_ATTEMPTS}` });
+        await new Promise(r => setTimeout(r, 1500 * attempt));
       }
-    } catch {}
+      try {
+        const ok = await runSalesKitAttempt();
+        if (ok) {
+          setKitLoading(false);
+          return;
+        }
+      } catch {
+        // network/parse error — fall through to retry
+      }
+    }
+
     setKitLoading(false);
+    setKitError("Couldn't generate the marketing kit after several tries.");
   };
 
   const sendEmail = async () => {
@@ -205,6 +248,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          to: emailTo,
           subject: brief.outreachEmailSubject,
           html: brief.outreachEmailBody.replace(/\n/g, "<br/>"),
         }),
@@ -230,6 +274,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          to: emailTo,
           business,
           lead,
           salesKit,
@@ -240,6 +285,8 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
       const data = await res.json();
       if (data.ok) {
         setKitEmailSent(true);
+        setKitSentTo(emailTo);
+        setEmailTo(""); // clear so the user can enter another recipient
       } else {
         setKitEmailError(data.error || "Failed to send");
       }
@@ -251,16 +298,14 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 
   const tabs = [
     { key: "account" as const, label: "Account Brief" },
-    { key: "email" as const, label: "Outreach Email" },
-    { key: "meeting" as const, label: "Meeting Prep" },
     { key: "kit" as const, label: "Marketing Kit" },
   ];
 
   const severityColor = (severity: string) => {
     switch (severity.toLowerCase()) {
-      case "high": return { bg: "#2a1515", border: "#4a2020", text: "#f5454a" };
-      case "medium": return { bg: "#2a2515", border: "#4a3d20", text: "#f5c842" };
-      default: return { bg: "#1a1a1a", border: "#2a2a2a", text: "#888" };
+      case "high": return { bg: "var(--danger-wash)", border: "var(--danger)", text: "var(--danger-text)" };
+      case "medium": return { bg: "var(--warning-wash)", border: "var(--warning)", text: "var(--warning-text)" };
+      default: return { bg: "var(--surface)", border: "var(--line)", text: "var(--ink-3)" };
     }
   };
 
@@ -268,38 +313,38 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     <div style={{ display: "flex", height: "calc(100vh - 57px)", overflow: "hidden" }}>
       {/* Sidebar */}
       <div style={{
-        width: 264, flexShrink: 0, background: "#111",
-        borderRight: "1px solid #1e1e1e", height: "100%",
+        width: 264, flexShrink: 0, background: "var(--bg)",
+        borderRight: "1px solid var(--line)", height: "100%",
         overflowY: "auto", padding: "28px 20px",
         display: "flex", flexDirection: "column",
       }}>
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
           STEP 3
         </div>
-        <div style={{ fontSize: 16, fontWeight: 600, color: "#f0f0f0", marginBottom: 20 }}>
-          Sales Kit
+        <div style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)", marginBottom: 20 }}>
+          Marketing Kit
         </div>
 
         {/* Target account */}
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
           TARGET ACCOUNT
         </div>
         <div style={{
-          background: "#1a1a1a", border: "1px solid #2a2a2a",
-          borderRadius: 8, padding: "10px 12px", marginBottom: 16,
+          background: "var(--surface)", border: "1px solid var(--line)",
+          borderRadius: "var(--radius-md)", padding: "10px 12px", marginBottom: 16,
         }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#f0f0f0" }}>{lead.name}</div>
-          <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{lead.category} • {lead.city}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{lead.name}</div>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>{lead.category} • {lead.city}</div>
           {lead.url && (
-            <a href={lead.url} target="_blank" rel="noopener" style={{ fontSize: 10, color: "#5b8af5", textDecoration: "none", display: "block", marginTop: 4 }}>
+            <a href={lead.url} target="_blank" rel="noopener" style={{ fontSize: 10, color: "var(--sage-strong)", textDecoration: "none", display: "block", marginTop: 4 }}>
               {lead.url.replace(/^https?:\/\//, "").slice(0, 35)}
             </a>
           )}
           {lead.email && (
-            <div style={{ fontSize: 10, color: "#3ecf8e", marginTop: 3 }}>✉ {lead.email}</div>
+            <div style={{ fontSize: 10, color: "var(--success)", marginTop: 3 }}>✉ {lead.email}</div>
           )}
           {lead.summary && (
-            <div style={{ fontSize: 11, color: "#888", marginTop: 6, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 6, lineHeight: 1.4 }}>
               {lead.summary.slice(0, 120)}{lead.summary.length > 120 ? "..." : ""}
             </div>
           )}
@@ -308,54 +353,36 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         {/* Contacts */}
         {contacts.length > 0 && (
           <>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
               CONTACTS
             </div>
             {contacts.map((c, i) => (
               <div key={i} style={{
                 display: "flex", alignItems: "center", gap: 8,
-                padding: "6px 0", borderBottom: i < contacts.length - 1 ? "1px solid #1e1e1e" : "none",
+                padding: "6px 0", borderBottom: i < contacts.length - 1 ? "1px solid var(--line)" : "none",
               }}>
                 <div style={{
                   width: 24, height: 24, borderRadius: "50%",
-                  background: "linear-gradient(135deg, #5b8af5, #3ecf8e)",
+                  background: "var(--sage)",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 10, fontWeight: 700, color: "#fff",
+                  fontSize: 10, fontWeight: 700, color: "var(--ink)",
                 }}>
                   {c.name.charAt(0)}
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, color: "#f0f0f0" }}>{c.name}</div>
-                  <div style={{ fontSize: 10, color: "#666" }}>{c.title}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink)" }}>{c.name}</div>
+                  <div style={{ fontSize: 10, color: "var(--ink-3)" }}>{c.title}</div>
                 </div>
               </div>
             ))}
           </>
         )}
 
-        <div style={{ height: 1, background: "#1e1e1e", margin: "16px 0" }} />
+        <div style={{ height: 1, background: "var(--line)", margin: "16px 0" }} />
 
-        {/* Memories used */}
-        {brief?.memoriesUsed && brief.memoriesUsed.length > 0 && (
-          <>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
-              MEMORIES USED
-            </div>
-            {brief.memoriesUsed.map((m, i) => (
-              <div key={i} style={{
-                fontSize: 11, color: "#3ecf8e", padding: "3px 8px",
-                background: "#0e1e16", border: "1px solid #2a4a37",
-                borderRadius: 10, marginBottom: 4,
-              }}>
-                {m}
-              </div>
-            ))}
-          </>
-        )}
-
-        <div style={{ marginTop: "auto", paddingTop: 20, borderTop: "1px solid #1e1e1e" }}>
+        <div style={{ marginTop: "auto", paddingTop: 20, borderTop: "1px solid var(--line)" }}>
           <button onClick={onBack} style={{
-            background: "none", border: "none", color: "#3a3a3a", fontSize: 13, cursor: "pointer",
+            background: "none", border: "none", color: "var(--ink-3)", fontSize: 13, cursor: "pointer",
           }}>← Back to Target Accounts</button>
         </div>
       </div>
@@ -366,16 +393,16 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
           <div style={{ textAlign: "center", paddingTop: 80 }}>
             <div style={{
               display: "inline-block", width: 20, height: 20,
-              border: "2px solid rgba(255,255,255,0.25)",
-              borderTopColor: "#fff", borderRadius: "50%",
+              border: "2px solid var(--line-strong)",
+              borderTopColor: "var(--sage)", borderRadius: "50%",
               animation: "spin 0.7s linear infinite",
               marginBottom: 16,
             }} />
-            <p style={{ fontSize: 15, color: "#f0f0f0", marginBottom: 8 }}>{progress.message}</p>
-            <p style={{ fontSize: 12, color: "#555" }}>{progress.detail}</p>
-            <div style={{ maxWidth: 300, margin: "16px auto", height: 2, background: "#222", borderRadius: 2 }}>
+            <p style={{ fontSize: 15, color: "var(--ink)", marginBottom: 8 }}>{progress.message}</p>
+            <p style={{ fontSize: 12, color: "var(--ink-3)" }}>{progress.detail}</p>
+            <div style={{ maxWidth: 300, margin: "16px auto", height: 2, background: "var(--surface-sunk)", borderRadius: 2 }}>
               <div style={{
-                height: "100%", background: "#f0f0f0", borderRadius: 2,
+                height: "100%", background: "var(--action)", borderRadius: 2,
                 width: `${progress.pct}%`, transition: "width 0.6s ease",
               }} />
             </div>
@@ -383,7 +410,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         ) : brief ? (
           <>
             {/* Tabs */}
-            <div style={{ display: "flex", gap: 0, marginBottom: 24, borderBottom: "1px solid #2a2a2a" }}>
+            <div style={{ display: "flex", gap: 0, marginBottom: 24, borderBottom: "1px solid var(--line)" }}>
               {tabs.map(t => (
                 <button
                   key={t.key}
@@ -391,9 +418,9 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                   style={{
                     background: "none", border: "none",
                     padding: "12px 20px", fontSize: 14, fontWeight: 500,
-                    color: tab === t.key ? "#f0f0f0" : "#666",
-                    borderBottom: tab === t.key ? "2px solid #f0f0f0" : "2px solid transparent",
-                    cursor: "pointer", fontFamily: "'Inter', sans-serif",
+                    color: tab === t.key ? "var(--ink)" : "var(--ink-3)",
+                    borderBottom: tab === t.key ? "2px solid var(--ink)" : "2px solid transparent",
+                    cursor: "pointer", fontFamily: "var(--font-sans)",
                     marginBottom: -1,
                   }}
                 >
@@ -409,28 +436,28 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                 <Section title="Fit Rationale" content={brief.fitRationale} />
                 {/* Company Contacts - Decision Makers */}
                 <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 12 }}>
                     COMPANY CONTACTS
                   </div>
                   {contacts.length > 0 ? (
-                    <div style={{ background: "#1c1c1c", border: "1px solid #2a2a2a", borderRadius: 8, padding: 16 }}>
+                    <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: 16 }}>
                       {contacts.map((c, i) => (
                         <div key={i} style={{
                           display: "flex", alignItems: "center", gap: 12,
                           padding: "10px 0",
-                          borderBottom: i < contacts.length - 1 ? "1px solid #222" : "none",
+                          borderBottom: i < contacts.length - 1 ? "1px solid var(--line)" : "none",
                         }}>
                           <div style={{
                             width: 32, height: 32, borderRadius: "50%",
-                            background: "linear-gradient(135deg, #5b8af5, #3ecf8e)",
+                            background: "var(--sage)",
                             display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 12, fontWeight: 700, color: "#fff", flexShrink: 0,
+                            fontSize: 12, fontWeight: 700, color: "var(--ink)", flexShrink: 0,
                           }}>
                             {(c.name || "?").charAt(0)}
                           </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 14, fontWeight: 500, color: "#f0f0f0" }}>{c.name}</div>
-                            <div style={{ fontSize: 12, color: "#666", marginTop: 2 }}>{c.title}</div>
+                            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--ink)" }}>{c.name}</div>
+                            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{c.title}</div>
                           </div>
                           {c.linkedinUrl && (
                             <a
@@ -438,8 +465,8 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                               target="_blank"
                               rel="noopener noreferrer"
                               style={{
-                                fontSize: 11, color: "#5b8af5", textDecoration: "none",
-                                padding: "4px 10px", border: "1px solid #5b8af533",
+                                fontSize: 11, color: "var(--sage-strong)", textDecoration: "none",
+                                padding: "4px 10px", border: "1px solid var(--sage)",
                                 borderRadius: 4, fontWeight: 500,
                               }}
                             >
@@ -451,12 +478,12 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                     </div>
                   ) : contactsLoading ? (
                     <div style={{
-                      background: "#1c1c1c", border: "1px solid #2a2a2a",
-                      borderRadius: 8, padding: "20px", textAlign: "center",
+                      background: "var(--surface)", border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-md)", padding: "20px", textAlign: "center",
                     }}>
-                      <div style={{ fontSize: 13, color: "#555" }}>Searching for decision makers...</div>
+                      <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Searching for decision makers...</div>
                       <div style={{
-                        width: 16, height: 16, border: "2px solid #5b8af5",
+                        width: 16, height: 16, border: "2px solid var(--sage)",
                         borderTopColor: "transparent", borderRadius: "50%",
                         animation: "spin 1s linear infinite",
                         margin: "10px auto 0",
@@ -464,27 +491,27 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                     </div>
                   ) : (
                     <div style={{
-                      background: "#1c1c1c", border: "1px solid #2a2a2a",
-                      borderRadius: 8, padding: "20px", textAlign: "center",
+                      background: "var(--surface)", border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-md)", padding: "20px", textAlign: "center",
                     }}>
-                      <div style={{ fontSize: 13, color: "#555" }}>No decision makers found for this company</div>
+                      <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No decision makers found for this company</div>
                     </div>
                   )}
                 </div>
 
                 {/* Prospect Pain Points — Review Analysis */}
                 <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 12 }}>
                     PROSPECT PAIN POINTS
                   </div>
                   {reviewsLoading ? (
                     <div style={{
-                      background: "#1c1c1c", border: "1px solid #2a2a2a",
-                      borderRadius: 8, padding: "24px", textAlign: "center",
+                      background: "var(--surface)", border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-md)", padding: "24px", textAlign: "center",
                     }}>
-                      <div style={{ fontSize: 13, color: "#555", marginBottom: 8 }}>Analyzing customer reviews...</div>
+                      <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 8 }}>Analyzing customer reviews...</div>
                       <div style={{
-                        width: 16, height: 16, border: "2px solid #f5454a",
+                        width: 16, height: 16, border: "2px solid var(--sage)",
                         borderTopColor: "transparent", borderRadius: "50%",
                         animation: "spin 1s linear infinite",
                         margin: "0 auto",
@@ -495,9 +522,9 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                       {/* Summary */}
                       {reviewAnalysis.summary && (
                         <div style={{
-                          background: "#1a1520", border: "1px solid #3a2040",
-                          borderRadius: 8, padding: "14px 18px", marginBottom: 16,
-                          fontSize: 13, color: "#d4a0e8", lineHeight: 1.6,
+                          background: "var(--sage-wash)", border: "1px solid var(--sage)",
+                          borderRadius: "var(--radius-md)", padding: "14px 18px", marginBottom: 16,
+                          fontSize: 13, color: "var(--sage-strong)", lineHeight: 1.6,
                         }}>
                           {reviewAnalysis.summary}
                         </div>
@@ -509,12 +536,12 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                           const colors = severityColor(pp.severity);
                           return (
                             <div key={i} style={{
-                              background: "#1c1c1c", border: "1px solid #2a2a2a",
-                              borderRadius: 8, padding: "14px 16px", marginBottom: 8,
+                              background: "var(--surface)", border: "1px solid var(--line)",
+                              borderRadius: "var(--radius-md)", padding: "14px 16px", marginBottom: 8,
                               borderLeft: `3px solid ${colors.text}`,
                             }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                                <span style={{ fontSize: 14, fontWeight: 600, color: "#f0f0f0", flex: 1 }}>
+                                <span style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", flex: 1 }}>
                                   {pp.issue}
                                 </span>
                                 <span style={{
@@ -527,14 +554,14 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                                   {pp.severity}
                                 </span>
                                 <span style={{
-                                  fontSize: 10, color: "#666",
-                                  padding: "3px 8px", background: "#1a1a1a",
-                                  borderRadius: 4, border: "1px solid #2a2a2a",
+                                  fontSize: 10, color: "var(--ink-3)",
+                                  padding: "3px 8px", background: "var(--surface)",
+                                  borderRadius: 4, border: "1px solid var(--line)",
                                 }}>
                                   {pp.frequency}
                                 </span>
                               </div>
-                              <div style={{ fontSize: 12, color: "#888", lineHeight: 1.5, fontStyle: "italic" }}>
+                              <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5, fontStyle: "italic" }}>
                                 "{pp.evidence}"
                               </div>
                             </div>
@@ -545,28 +572,28 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                       {/* Solution Mapping Table */}
                       {reviewAnalysis.solutionMapping.length > 0 && (
                         <div style={{ marginBottom: 16 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
                             SOLUTION MAPPING
                           </div>
-                          <div style={{ border: "1px solid #2a2a2a", borderRadius: 8, overflow: "hidden" }}>
+                          <div style={{ border: "1px solid var(--line)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
                             <div style={{
                               display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
-                              background: "#161616", padding: "10px 14px",
-                              borderBottom: "1px solid #2a2a2a",
+                              background: "var(--surface)", padding: "10px 14px",
+                              borderBottom: "1px solid var(--line)",
                             }}>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: "#f5454a" }}>Their Pain</span>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: "#5b8af5" }}>Our Solution</span>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: "#3ecf8e" }}>Talking Point</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--danger-text)" }}>Their Pain</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--sage-strong)" }}>Our Solution</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--sage-strong)" }}>Talking Point</span>
                             </div>
                             {reviewAnalysis.solutionMapping.map((sm, i) => (
                               <div key={i} style={{
                                 display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
-                                padding: "10px 14px", background: "#1c1c1c",
-                                borderBottom: i < reviewAnalysis.solutionMapping.length - 1 ? "1px solid #222" : "none",
+                                padding: "10px 14px", background: "var(--surface)",
+                                borderBottom: i < reviewAnalysis.solutionMapping.length - 1 ? "1px solid var(--line)" : "none",
                               }}>
-                                <span style={{ fontSize: 12, color: "#ccc" }}>{sm.painPoint}</span>
-                                <span style={{ fontSize: 12, color: "#ccc" }}>{sm.ourSolution}</span>
-                                <span style={{ fontSize: 12, color: "#888", fontStyle: "italic" }}>{sm.talkingPoint}</span>
+                                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{sm.painPoint}</span>
+                                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{sm.ourSolution}</span>
+                                <span style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>{sm.talkingPoint}</span>
                               </div>
                             ))}
                           </div>
@@ -576,7 +603,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                       {/* Review Snippets */}
                       {reviewAnalysis.reviews.length > 0 && (
                         <div>
-                          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
                             REVIEW SNIPPETS
                           </div>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -584,27 +611,27 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                         .sort((a, b) => (a.sentiment === "negative" ? -1 : 1) - (b.sentiment === "negative" ? -1 : 1))
                         .slice(0, 4).map((rev, i) => (
                               <div key={i} style={{
-                                background: "#161616", border: "1px solid #2a2a2a",
-                                borderRadius: 8, padding: "12px 14px",
+                                background: "var(--surface)", border: "1px solid var(--line)",
+                                borderRadius: "var(--radius-md)", padding: "12px 14px",
                               }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                                  <span style={{ fontSize: 11, color: rev.sentiment === "negative" ? "#f5454a" : rev.sentiment === "positive" ? "#3ecf8e" : "#888" }}>
+                                  <span style={{ fontSize: 11, color: rev.sentiment === "negative" ? "var(--danger)" : rev.sentiment === "positive" ? "var(--success)" : "var(--ink-3)" }}>
                                     {rev.sentiment === "negative" ? "▼" : rev.sentiment === "positive" ? "▲" : "—"}
                                   </span>
                                   {rev.rating > 0 && (
-                                    <span style={{ fontSize: 11, color: "#f5c842" }}>
+                                    <span style={{ fontSize: 11, color: "var(--gold)" }}>
                                       {"★".repeat(rev.rating)}{"☆".repeat(5 - rev.rating)}
                                     </span>
                                   )}
                                 </div>
-                                <div style={{ fontSize: 12, color: "#aaa", lineHeight: 1.5 }}>
+                                <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>
                                   "{rev.text.slice(0, 120)}{rev.text.length > 120 ? "..." : ""}"
                                 </div>
                                 <a
                                   href={rev.source}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  style={{ fontSize: 10, color: "#5b8af5", textDecoration: "none", marginTop: 6, display: "block" }}
+                                  style={{ fontSize: 10, color: "var(--sage-strong)", textDecoration: "none", marginTop: 6, display: "block" }}
                                 >
                                   Source ↗
                                 </a>
@@ -616,10 +643,10 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                     </div>
                   ) : (
                     <div style={{
-                      background: "#1c1c1c", border: "1px solid #2a2a2a",
-                      borderRadius: 8, padding: "20px", textAlign: "center",
+                      background: "var(--surface)", border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-md)", padding: "20px", textAlign: "center",
                     }}>
-                      <div style={{ fontSize: 13, color: "#555" }}>
+                      <div style={{ fontSize: 13, color: "var(--ink-3)" }}>
                         {reviewAnalysis?.summary || "No customer reviews found for this company"}
                       </div>
                     </div>
@@ -631,23 +658,23 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
             {tab === "email" && (
               <div style={{ animation: "fadeIn 0.3s ease" }}>
                 <div style={{ marginBottom: 20 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
                     SUBJECT
                   </div>
                   <div style={{
-                    background: "#1c1c1c", border: "1px solid #2a2a2a",
-                    borderRadius: 8, padding: "12px 16px", fontSize: 14, color: "#f0f0f0",
+                    background: "var(--surface)", border: "1px solid var(--line)",
+                    borderRadius: "var(--radius-md)", padding: "12px 16px", fontSize: 14, color: "var(--ink)",
                   }}>
                     {brief.outreachEmailSubject}
                   </div>
                 </div>
                 <div style={{ marginBottom: 20 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
                     BODY
                   </div>
                   <div style={{
-                    background: "#1c1c1c", border: "1px solid #2a2a2a",
-                    borderRadius: 8, padding: "16px 20px", fontSize: 14, color: "#ccc",
+                    background: "var(--surface)", border: "1px solid var(--line)",
+                    borderRadius: "var(--radius-md)", padding: "16px 20px", fontSize: 14, color: "var(--ink-2)",
                     lineHeight: 1.7, whiteSpace: "pre-wrap",
                   }}>
                     {brief.outreachEmailBody}
@@ -656,35 +683,39 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 
                 {/* Send email */}
                 <div style={{
-                  background: "#161616", border: "1px solid #2a2a2a",
-                  borderRadius: 10, padding: "16px 20px", marginTop: 24,
+                  background: "var(--surface)", border: "1px solid var(--line)",
+                  borderRadius: "var(--radius-md)", padding: "16px 20px", marginTop: 24,
                 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 10 }}>
                     SEND VIA RESEND
                   </div>
                   {emailSent ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ color: "#3ecf8e", fontSize: 16 }}>✓</span>
-                      <span style={{ fontSize: 14, color: "#3ecf8e" }}>Email sent successfully!</span>
+                      <span style={{ color: "var(--success)", fontSize: 16 }}>✓</span>
+                      <span style={{ fontSize: 14, color: "var(--success)" }}>Email sent successfully!</span>
                     </div>
                   ) : (
                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      <div style={{
-                        flex: 1, background: "#1c1c1c", border: "1px solid #2a2a2a",
-                        borderRadius: 8, padding: "10px 14px", fontSize: 14, color: "#f0f0f0",
-                        fontFamily: "'Inter', sans-serif",
-                      }}>
-                        To: {emailTo}
-                      </div>
+                      <input
+                        type="email"
+                        value={emailTo}
+                        onChange={(e) => setEmailTo(e.target.value)}
+                        placeholder="Enter recipient email"
+                        style={{
+                          flex: 1, background: "var(--surface-2)", border: "1px solid var(--line)",
+                          borderRadius: "var(--radius-md)", padding: "10px 14px", fontSize: 14, color: "var(--ink)",
+                          outline: "none", fontFamily: "var(--font-sans)",
+                        }}
+                      />
                       <button
                         onClick={sendEmail}
-                        disabled={emailSending}
+                        disabled={emailSending || !hasEmail}
                         style={{
-                          background: "#5b8af5", color: "#fff", border: "none",
-                          borderRadius: 8, padding: "10px 20px", fontSize: 14, fontWeight: 600,
-                          cursor: emailSending ? "not-allowed" : "pointer",
-                          opacity: emailSending ? 0.5 : 1,
-                          fontFamily: "'Inter', sans-serif", whiteSpace: "nowrap",
+                          background: "var(--action)", color: "var(--action-fg)", border: "none",
+                          borderRadius: "var(--radius-md)", padding: "10px 20px", fontSize: 14, fontWeight: 600,
+                          cursor: (emailSending || !hasEmail) ? "not-allowed" : "pointer",
+                          opacity: (emailSending || !hasEmail) ? 0.5 : 1,
+                          fontFamily: "var(--font-sans)", whiteSpace: "nowrap",
                         }}
                       >
                         {emailSending ? "Sending..." : "Send Email"}
@@ -692,7 +723,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                     </div>
                   )}
                   {emailError && (
-                    <p style={{ fontSize: 12, color: "#f5454a", marginTop: 8 }}>{emailError}</p>
+                    <p style={{ fontSize: 12, color: "var(--danger-text)", marginTop: 8 }}>{emailError}</p>
                   )}
                 </div>
               </div>
@@ -703,33 +734,33 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                 <Section title="Meeting Preparation" content={brief.meetingPrep} />
 
                 <div style={{ marginTop: 24 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 12 }}>
                     DISCOVERY QUESTIONS
                   </div>
                   {brief.discoveryQuestions.map((q, i) => (
                     <div key={i} style={{
                       display: "flex", alignItems: "flex-start", gap: 10,
-                      padding: "10px 0", borderBottom: i < brief.discoveryQuestions.length - 1 ? "1px solid #1e1e1e" : "none",
+                      padding: "10px 0", borderBottom: i < brief.discoveryQuestions.length - 1 ? "1px solid var(--line)" : "none",
                     }}>
-                      <span style={{ color: "#5b8af5", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{i + 1}.</span>
-                      <span style={{ fontSize: 14, color: "#ccc", lineHeight: 1.5 }}>{q}</span>
+                      <span style={{ color: "var(--sage-strong)", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{i + 1}.</span>
+                      <span style={{ fontSize: 14, color: "var(--ink-2)", lineHeight: 1.5 }}>{q}</span>
                     </div>
                   ))}
                 </div>
 
                 <div style={{ marginTop: 24 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 12 }}>
                     OBJECTIONS & RESPONSES
                   </div>
                   {brief.objectionsAndResponses.map((item, i) => (
                     <div key={i} style={{
-                      background: "#1c1c1c", border: "1px solid #2a2a2a",
-                      borderRadius: 8, padding: "14px 16px", marginBottom: 8,
+                      background: "var(--surface)", border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-md)", padding: "14px 16px", marginBottom: 8,
                     }}>
-                      <div style={{ fontSize: 13, color: "#f5454a", fontWeight: 600, marginBottom: 6 }}>
+                      <div style={{ fontSize: 13, color: "var(--danger-text)", fontWeight: 600, marginBottom: 6 }}>
                         Objection: {item.objection}
                       </div>
-                      <div style={{ fontSize: 13, color: "#3ecf8e", lineHeight: 1.5 }}>
+                      <div style={{ fontSize: 13, color: "var(--sage-strong)", lineHeight: 1.5 }}>
                         Response: {item.response}
                       </div>
                     </div>
@@ -744,55 +775,29 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                   <div style={{ textAlign: "center", paddingTop: 60 }}>
                     <div style={{
                       display: "inline-block", width: 20, height: 20,
-                      border: "2px solid rgba(255,255,255,0.25)",
-                      borderTopColor: "#fff", borderRadius: "50%",
+                      border: "2px solid var(--line-strong)",
+                      borderTopColor: "var(--sage)", borderRadius: "50%",
                       animation: "spin 0.7s linear infinite",
                       marginBottom: 16,
                     }} />
-                    <p style={{ fontSize: 15, color: "#f0f0f0", marginBottom: 8 }}>{kitProgress.message}</p>
-                    <p style={{ fontSize: 12, color: "#555" }}>{kitProgress.detail}</p>
-                    <div style={{ maxWidth: 300, margin: "16px auto", height: 2, background: "#222", borderRadius: 2 }}>
+                    <p style={{ fontSize: 15, color: "var(--ink)", marginBottom: 8 }}>{kitProgress.message}</p>
+                    <p style={{ fontSize: 12, color: "var(--ink-3)" }}>{kitProgress.detail}</p>
+                    <div style={{ maxWidth: 300, margin: "16px auto", height: 2, background: "var(--surface-sunk)", borderRadius: 2 }}>
                       <div style={{
-                        height: "100%", background: "linear-gradient(90deg, #5b8af5, #3ecf8e)", borderRadius: 2,
+                        height: "100%", background: "var(--sage)", borderRadius: 2,
                         width: `${kitProgress.pct}%`, transition: "width 0.6s ease",
                       }} />
                     </div>
                   </div>
                 ) : salesKit ? (
                   <>
-                    {/* Account Brief */}
                     <div style={{ marginBottom: 24 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
-                        ACCOUNT BRIEF
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
+                        SUGGESTED BD / SALES ANGLE
                       </div>
                       <div style={{
-                        background: "#1c1c1c", border: "1px solid #2a2a2a",
-                        borderRadius: 8, padding: "16px 20px", fontSize: 14, color: "#ccc", lineHeight: 1.7,
-                      }}>
-                        {salesKit.accountBrief}
-                      </div>
-                    </div>
-
-                    {/* Sales Kit Results */}
-                    <div style={{ marginBottom: 24 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
-                        WHY RELEVANT NOW
-                      </div>
-                      <div style={{
-                        background: "#1c1c1c", border: "1px solid #2a2a2a",
-                        borderRadius: 8, padding: "16px 20px", fontSize: 14, color: "#ccc", lineHeight: 1.7,
-                      }}>
-                        {salesKit.whyRelevantNow}
-                      </div>
-                    </div>
-
-                    <div style={{ marginBottom: 24 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
-                        SUGGESTED BD ANGLE
-                      </div>
-                      <div style={{
-                        background: "#0e1e16", border: "1px solid #2a4a37",
-                        borderRadius: 8, padding: "12px 16px", fontSize: 14, color: "#3ecf8e", fontWeight: 500,
+                        background: "var(--success-wash)", border: "1px solid var(--success)",
+                        borderRadius: "var(--radius-md)", padding: "12px 16px", fontSize: 14, color: "var(--success)", fontWeight: 500,
                       }}>
                         {salesKit.suggestedAngle}
                       </div>
@@ -800,106 +805,46 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 
                     {/* Synergies Table */}
                     <div style={{ marginBottom: 24 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 12 }}>
                         TOP SYNERGIES
                       </div>
-                      <div style={{ border: "1px solid #2a2a2a", borderRadius: 8, overflow: "hidden" }}>
+                      <div style={{ border: "1px solid var(--line)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
                         <div style={{
                           display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
-                          background: "#161616", padding: "10px 14px",
-                          borderBottom: "1px solid #2a2a2a",
+                          background: "var(--surface)", padding: "10px 14px",
+                          borderBottom: "1px solid var(--line)",
                         }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#5b8af5" }}>Seller Product</span>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#f5454a" }}>Prospect Pain</span>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#3ecf8e" }}>Evidence</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--sage-strong)" }}>Seller Product</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--danger-text)" }}>Prospect Pain</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--sage-strong)" }}>Evidence</span>
                         </div>
                         {salesKit.synergies.map((s, i) => (
                           <div key={i} style={{
                             display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
-                            padding: "10px 14px", background: "#1c1c1c",
-                            borderBottom: i < salesKit.synergies.length - 1 ? "1px solid #222" : "none",
+                            padding: "10px 14px", background: "var(--surface)",
+                            borderBottom: i < salesKit.synergies.length - 1 ? "1px solid var(--line)" : "none",
                           }}>
-                            <span style={{ fontSize: 12, color: "#ccc" }}>{s.sellerProduct}</span>
-                            <span style={{ fontSize: 12, color: "#ccc" }}>{s.prospectPain}</span>
-                            <span style={{ fontSize: 12, color: "#888", fontStyle: "italic" }}>{s.evidence}</span>
+                            <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{s.sellerProduct}</span>
+                            <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{s.prospectPain}</span>
+                            <span style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>{s.evidence}</span>
                           </div>
                         ))}
                       </div>
                     </div>
 
-                    {/* Solutions */}
-                    {salesKit.solutions && salesKit.solutions.length > 0 && (
-                      <div style={{ marginBottom: 24 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
-                          RELEVANT SOLUTIONS
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                          {salesKit.solutions.map((s, i) => (
-                            <div key={i} style={{
-                              background: "#161616", border: "1px solid #2a2a2a",
-                              borderRadius: 8, padding: "14px 16px",
-                            }}>
-                              <div style={{ fontSize: 13, fontWeight: 600, color: "#f0f0f0", marginBottom: 4 }}>{s.title}</div>
-                              <div style={{ fontSize: 12, color: "#888", lineHeight: 1.5 }}>{s.description}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Why This Prospect */}
-                    {salesKit.whyThisProspect && salesKit.whyThisProspect.length > 0 && (
-                      <div style={{ marginBottom: 24 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
-                          WHY THIS PROSPECT
-                        </div>
-                        <div style={{ background: "#161616", border: "1px solid #2a2a2a", borderRadius: 8, padding: "16px 20px" }}>
-                          {salesKit.whyThisProspect.map((point, i) => (
-                            <div key={i} style={{
-                              display: "flex", gap: 10, alignItems: "flex-start",
-                              padding: "8px 0", borderBottom: i < salesKit.whyThisProspect.length - 1 ? "1px solid #222" : "none",
-                            }}>
-                              <span style={{ color: "#5b8af5", fontWeight: 700, fontSize: 13, minWidth: 18 }}>{i + 1}.</span>
-                              <span style={{ fontSize: 13, color: "#ccc", lineHeight: 1.5 }}>{point}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Proof Stats */}
-                    {salesKit.proofStats && salesKit.proofStats.length > 0 && (
-                      <div style={{ marginBottom: 24 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
-                          TRACK RECORD
-                        </div>
-                        <div style={{ display: "flex", gap: 12 }}>
-                          {salesKit.proofStats.map((stat, i) => (
-                            <div key={i} style={{
-                              flex: 1, background: "#161616", border: "1px solid #2a2a2a",
-                              borderRadius: 8, padding: "16px", textAlign: "center",
-                            }}>
-                              <div style={{ fontSize: 22, fontWeight: 700, color: "#5b8af5" }}>{stat.number}</div>
-                              <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{stat.label}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Kit-generated Outreach Email */}
+                    {/* Outreach Email Draft */}
                     <div style={{ marginBottom: 24 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
-                        KIT OUTREACH EMAIL
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
+                        OUTREACH EMAIL DRAFT
                       </div>
                       <div style={{
-                        background: "#1c1c1c", border: "1px solid #2a2a2a",
-                        borderRadius: 8, padding: "16px 20px", marginBottom: 12,
+                        background: "var(--surface)", border: "1px solid var(--line)",
+                        borderRadius: "var(--radius-md)", padding: "16px 20px", marginBottom: 12,
                       }}>
-                        <div style={{ fontSize: 12, color: "#5b8af5", fontWeight: 600, marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, color: "var(--sage-strong)", fontWeight: 600, marginBottom: 8 }}>
                           Subject: {salesKit.outreachEmailSubject}
                         </div>
-                        <div style={{ fontSize: 14, color: "#ccc", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+                        <div style={{ fontSize: 14, color: "var(--ink-2)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
                           {salesKit.outreachEmailBody}
                         </div>
                       </div>
@@ -910,38 +855,38 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                           onClick={loadEmailPreview}
                           disabled={previewLoading}
                           style={{
-                            background: "none", border: "1px solid #2a2a2a",
-                            borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600,
-                            color: "#5b8af5", cursor: previewLoading ? "wait" : "pointer", fontFamily: "'Inter', sans-serif",
+                            background: "none", border: "1px solid var(--line)",
+                            borderRadius: "var(--radius-md)", padding: "10px 16px", fontSize: 13, fontWeight: 600,
+                            color: "var(--sage-strong)", cursor: previewLoading ? "wait" : "pointer", fontFamily: "var(--font-sans)",
                             width: "100%", textAlign: "left",
                             display: "flex", alignItems: "center", justifyContent: "space-between",
                           }}
                         >
-                          <span>{previewLoading ? "Loading..." : `${showEmailPreview ? "Hide" : "Preview"} Email`}</span>
-                          <span style={{ fontSize: 11, color: "#666" }}>{showEmailPreview ? "\u25B2" : "\u25BC"}</span>
+                          <span>{previewLoading ? "Loading..." : `${showEmailPreview ? "Hide" : "Preview"} Email and PDF`}</span>
+                          <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{showEmailPreview ? "\u25B2" : "\u25BC"}</span>
                         </button>
                         {showEmailPreview && (
                           <div style={{
-                            marginTop: 12, border: "1px solid #2a2a2a", borderRadius: 10,
-                            overflow: "hidden", background: "#0f0f0f",
+                            marginTop: 12, border: "1px solid var(--line)", borderRadius: "var(--radius-md)",
+                            overflow: "hidden", background: "var(--bg)",
                           }}>
                             <div style={{
-                              padding: "8px 14px", background: "#1a1a1a", borderBottom: "1px solid #2a2a2a",
+                              padding: "8px 14px", background: "var(--surface)", borderBottom: "1px solid var(--line)",
                               display: "flex", alignItems: "center", justifyContent: "space-between",
                             }}>
-                              <span style={{ fontSize: 11, color: "#666", fontWeight: 600 }}>EMAIL PREVIEW</span>
-                              <span style={{ fontSize: 11, color: "#555" }}>To: {emailTo}</span>
+                              <span style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>EMAIL PREVIEW</span>
+                              <span style={{ fontSize: 11, color: "var(--ink-3)" }}>To: {emailToDisplay}</span>
                             </div>
                             {previewLoading ? (
                               <div style={{ padding: 40, textAlign: "center" }}>
-                                <div style={{ width: 24, height: 24, border: "2px solid #333", borderTopColor: "#5b8af5", borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto" }} />
+                                <div style={{ width: 24, height: 24, border: "2px solid var(--line-strong)", borderTopColor: "var(--sage)", borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto" }} />
                               </div>
                             ) : (
                               <iframe
                                 srcDoc={emailPreviewHtml}
                                 style={{
                                   width: "100%", height: 500, border: "none",
-                                  background: "#0f0f0f",
+                                  background: "var(--bg)",
                                 }}
                                 sandbox="allow-same-origin"
                                 title="Email Preview"
@@ -953,81 +898,82 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 
                       {/* Send Kit Email */}
                       <div style={{
-                        background: "#161616", border: "1px solid #2a2a2a",
-                        borderRadius: 10, padding: "16px 20px", marginTop: 16,
+                        background: "var(--surface)", border: "1px solid var(--line)",
+                        borderRadius: "var(--radius-md)", padding: "16px 20px", marginTop: 16,
                       }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 10 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 10 }}>
                           SEND MARKETING EMAIL
                         </div>
-                        {kitEmailSent ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <span style={{ color: "#3ecf8e", fontSize: 16 }}>✓</span>
-                            <span style={{ fontSize: 14, color: "#3ecf8e" }}>Kit email sent to {emailTo}!</span>
-                          </div>
-                        ) : (
-                          <div>
-                            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                              <div style={{
-                                flex: 1, background: "#1c1c1c", border: "1px solid #2a2a2a",
-                                borderRadius: 8, padding: "10px 14px", fontSize: 14, color: "#f0f0f0",
-                                fontFamily: "'Inter', sans-serif",
-                              }}>
-                                To: {emailTo}
-                              </div>
-                              <button
-                                onClick={sendKitEmail}
-                                disabled={kitEmailSending}
-                                style={{
-                                  background: "linear-gradient(135deg, #5b8af5, #3ecf8e)", color: "#fff", border: "none",
-                                  borderRadius: 8, padding: "10px 20px", fontSize: 14, fontWeight: 600,
-                                  cursor: kitEmailSending ? "not-allowed" : "pointer",
-                                  opacity: kitEmailSending ? 0.5 : 1,
-                                  fontFamily: "'Inter', sans-serif", whiteSpace: "nowrap",
-                                }}
-                              >
-                                {kitEmailSending ? "Sending..." : "Send Kit Email"}
-                              </button>
+                        <div>
+                          {/* Success line — stays visible while still allowing another send */}
+                          {kitEmailSent && kitSentTo && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                              <span style={{ color: "var(--success)", fontSize: 16 }}>✓</span>
+                              <span style={{ fontSize: 14, color: "var(--success)" }}>Sent to {kitSentTo}. Add another recipient below to send again.</span>
                             </div>
-                            <p style={{ fontSize: 11, color: "#555", marginTop: 8 }}>
-                              Sends a branded native HTML email with outreach message, synergies, and CTA
-                            </p>
-                            {kitEmailError && (
-                              <p style={{ fontSize: 12, color: "#f5454a", marginTop: 8 }}>{kitEmailError}</p>
-                            )}
+                          )}
+                          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                            <input
+                              type="email"
+                              value={emailTo}
+                              onChange={(e) => setEmailTo(e.target.value)}
+                              placeholder="Enter recipient email"
+                              style={{
+                                flex: 1, background: "var(--surface-2)", border: "1px solid var(--line)",
+                                borderRadius: "var(--radius-md)", padding: "10px 14px", fontSize: 14, color: "var(--ink)",
+                                outline: "none", fontFamily: "var(--font-sans)",
+                              }}
+                            />
+                            <button
+                              onClick={sendKitEmail}
+                              disabled={kitEmailSending || !hasEmail}
+                              style={{
+                                background: "var(--action)", color: "var(--action-fg)", border: "none",
+                                borderRadius: "var(--radius-md)", padding: "10px 20px", fontSize: 14, fontWeight: 600,
+                                cursor: (kitEmailSending || !hasEmail) ? "not-allowed" : "pointer",
+                                opacity: (kitEmailSending || !hasEmail) ? 0.5 : 1,
+                                fontFamily: "var(--font-sans)", whiteSpace: "nowrap",
+                              }}
+                            >
+                              {kitEmailSending ? "Sending..." : kitEmailSent ? "Send to Another" : "Send Marketing Email"}
+                            </button>
                           </div>
-                        )}
+                          <p style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 8 }}>
+                            Sends a branded native HTML email with outreach message, synergies, and CTA
+                          </p>
+                          {kitEmailError && (
+                            <p style={{ fontSize: 12, color: "var(--danger-text)", marginTop: 8 }}>{kitEmailError}</p>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </>
-                ) : (
+                ) : kitError ? (
                   <div style={{ textAlign: "center", paddingTop: 60 }}>
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{
-                        width: 56, height: 56, margin: "0 auto 16px",
-                        background: "linear-gradient(135deg, #5b8af5, #3ecf8e)",
-                        borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 24,
-                      }}>
-                        📄
-                      </div>
-                      <h3 style={{ fontSize: 18, fontWeight: 600, color: "#f0f0f0", marginBottom: 8 }}>
-                        Generate Marketing Kit
-                      </h3>
-                      <p style={{ fontSize: 14, color: "#666", maxWidth: 400, margin: "0 auto 24px", lineHeight: 1.6 }}>
-                        Create a branded HTML one-pager with synergy analysis, proof points, and a personalized pitch — styled to match {business.companyName}'s brand.
-                      </p>
-                    </div>
+                    <p style={{ fontSize: 15, color: "var(--ink)", marginBottom: 8 }}>{kitError}</p>
+                    <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 20 }}>The AI service may be busy. Please try again.</p>
                     <button
                       onClick={generateSalesKit}
                       style={{
-                        background: "linear-gradient(135deg, #5b8af5, #3ecf8e)",
-                        color: "#fff", border: "none",
-                        borderRadius: 8, padding: "12px 28px", fontSize: 15, fontWeight: 600,
-                        cursor: "pointer", fontFamily: "'Inter', sans-serif",
+                        background: "var(--action)", color: "var(--action-fg)", border: "none",
+                        borderRadius: "var(--radius-md)", padding: "12px 28px", fontSize: 15, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "var(--font-sans)",
                       }}
                     >
-                      Generate Sales Kit
+                      Retry
                     </button>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: "center", paddingTop: 60 }}>
+                    <div style={{
+                      display: "inline-block", width: 20, height: 20,
+                      border: "2px solid var(--line-strong)",
+                      borderTopColor: "var(--sage)", borderRadius: "50%",
+                      animation: "spin 0.7s linear infinite",
+                      marginBottom: 16,
+                    }} />
+                    <p style={{ fontSize: 15, color: "var(--ink)", marginBottom: 8 }}>Generating marketing kit…</p>
+                    <p style={{ fontSize: 12, color: "var(--ink-3)" }}>Analyzing synergies and drafting your outreach email</p>
                   </div>
                 )}
               </div>
@@ -1035,10 +981,10 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
           </>
         ) : (
           <div style={{ textAlign: "center", paddingTop: 80 }}>
-            <p style={{ color: "#555" }}>Brief generation failed. Please try again.</p>
+            <p style={{ color: "var(--ink-3)" }}>Brief generation failed. Please try again.</p>
             <button onClick={generateBrief} style={{
-              marginTop: 16, background: "#f0f0f0", color: "#0f0f0f", border: "none",
-              borderRadius: 8, padding: "10px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer",
+              marginTop: 16, background: "var(--action)", color: "var(--action-fg)", border: "none",
+              borderRadius: "var(--radius-md)", padding: "10px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer",
             }}>
               Retry
             </button>
@@ -1052,12 +998,12 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 function Section({ title, content }: { title: string; content: string }) {
   return (
     <div style={{ marginBottom: 24 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
         {title.toUpperCase()}
       </div>
       <div style={{
-        background: "#1c1c1c", border: "1px solid #2a2a2a",
-        borderRadius: 8, padding: "16px 20px", fontSize: 14, color: "#ccc", lineHeight: 1.7,
+        background: "var(--surface)", border: "1px solid var(--line)",
+        borderRadius: "var(--radius-md)", padding: "16px 20px", fontSize: 14, color: "var(--ink-2)", lineHeight: 1.7,
       }}>
         {content}
       </div>

@@ -1,4 +1,122 @@
-/* Biks.ai - Global Reset & Animations */
+/* Biks.ai — Global tokens, reset & animations
+ * Design system: warm parchment canvas, warm near-black ink, single sage accent.
+ * Tokens are the single source of truth — components consume them via var(--token).
+ */
+
+:root {
+  /* Neutrals (warm) */
+  --bg: #EDE8DF;
+  --surface: #F4F0E8;
+  --surface-2: #F9F7F2;
+  --surface-sunk: #E5DFD4;
+  --ink: #201E1A;
+  --ink-2: #3A3632;
+  --ink-3: #6A6460;
+  --ink-4: #9A9590;
+  --line: rgba(32, 30, 26, 0.10);
+  --line-strong: rgba(32, 30, 26, 0.18);
+
+  /* Sage — the accent / interactive color */
+  --sage: #8FA8AC;
+  --sage-strong: #5A7A7E;
+  --sage-deep: #3E7468;
+  --sage-soft: #A8B8BC;
+  --sage-wash: #E2EAEB;
+
+  /* Gold — secondary accent, sparingly */
+  --gold: #C8A06A;
+  --gold-text: #9A7B45;
+
+  /* Action (buttons) — ink fill + cream text */
+  --action: #201E1A;
+  --action-fg: #F4F0E8;
+  --action-hover: #3A3632;
+
+  /* Status — muted & warm, never neon */
+  --success: #4F7A5E;
+  --success-wash: #E4EDE5;
+  --success-text: #2F5640;
+  --warning: #B8862F;
+  --warning-wash: #F3E9D2;
+  --warning-text: #6B4E18;
+  --danger: #B5503E;
+  --danger-wash: #F3E2DD;
+  --danger-text: #7A2E22;
+  --info: #5A7A7E;
+  --info-wash: #E2EAEB;
+  --info-text: #34504F;
+
+  /* Translucency (use instead of /opacity on var() colors) */
+  --hover-subtle: rgba(32, 30, 26, 0.05);
+  --hover-strong: rgba(32, 30, 26, 0.10);
+  --scrim: rgba(32, 30, 26, 0.45);
+  --ring: 0 0 0 3px rgba(143, 168, 172, 0.45);
+
+  /* Elevation — soft, long, low-opacity */
+  --shadow-1: 0 1px 2px rgba(32, 30, 26, 0.04), 0 1px 1px rgba(32, 30, 26, 0.03);
+  --shadow-2: 0 4px 12px rgba(32, 30, 26, 0.06), 0 1px 3px rgba(32, 30, 26, 0.04);
+  --shadow-3: 0 12px 32px rgba(32, 30, 26, 0.10);
+  --shadow-pop: 0 16px 40px rgba(32, 30, 26, 0.12);
+
+  /* Radius */
+  --radius-md: 10px;
+  --radius-xl: 20px;
+
+  /* Type */
+  --font-sans: 'General Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.dark {
+  --bg: #201E1A;
+  --surface: #2A2722;
+  --surface-2: #322E29;
+  --surface-sunk: #1A1814;
+  --ink: #F4F0E8;
+  --ink-2: #DAD4C9;
+  --ink-3: #A8A29A;
+  --ink-4: #79736C;
+  --line: rgba(244, 240, 232, 0.10);
+  --line-strong: rgba(244, 240, 232, 0.18);
+
+  --sage: #8FA8AC;
+  --sage-strong: #A8C0C3;
+  --sage-deep: #6FA697;
+  --sage-soft: #5A7A7E;
+  --sage-wash: #2C3A3B;
+
+  --gold: #C8A06A;
+  --gold-text: #D8B98A;
+
+  /* Action flips to cream fill + ink text in dark */
+  --action: #F4F0E8;
+  --action-fg: #201E1A;
+  --action-hover: #DAD4C9;
+
+  --success: #6FA17E;
+  --success-wash: #243029;
+  --success-text: #A6C9B0;
+  --warning: #D6A94E;
+  --warning-wash: #332916;
+  --warning-text: #E0BE7A;
+  --danger: #D27866;
+  --danger-wash: #3A2620;
+  --danger-text: #E6A99B;
+  --info: #8FA8AC;
+  --info-wash: #2C3A3B;
+  --info-text: #B5CCCE;
+
+  --hover-subtle: rgba(244, 240, 232, 0.06);
+  --hover-strong: rgba(244, 240, 232, 0.12);
+  --scrim: rgba(10, 9, 8, 0.55);
+  --ring: 0 0 0 3px rgba(143, 168, 172, 0.45);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.20);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.28);
+  --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.40);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -6,21 +124,26 @@
 }
 
 body {
-  font-family: 'Inter', sans-serif;
-  background: #0f0f0f;
-  color: #f0f0f0;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--ink-2);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
 
-::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
-* { scrollbar-width: thin; scrollbar-color: #2a2a2a transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
 
@@ -31,4 +154,12 @@ body {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
