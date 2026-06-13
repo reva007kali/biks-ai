@@ -99,10 +99,10 @@ export default function HeroStep({ onComplete }: Props) {
           marginBottom: 12,
           letterSpacing: "-0.02em",
         }}>
-          Know your next customer
+          Unlock new business opportunity
         </h1>
         <p style={{ fontSize: 15, color: "#666", marginBottom: 40, textAlign: "center" }}>
-          Paste your business website. Let AI find your next market.
+          Biks turns your existing site into market opportunities, leads, and outreach-ready sales kits.
         </p>
 
         {/* Input */}
