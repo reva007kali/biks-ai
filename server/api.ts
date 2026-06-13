@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { ENV } from "./_core/env";
-import { invokeLLM } from "./_core/llm";
+import { manusTask } from "./_core/manus";
 
 const api = Router();
 
@@ -112,59 +112,44 @@ Generate 4-5 expansion categories. Focus on premium B2B segments.`;
 
     sseSend(res, { type: "progress", pct: 40, message: "AI agent started...", detail: "Generating business profile" });
 
-    const result = await invokeLLM({
-      messages: [
-        { role: "system", content: "You are a B2B market analysis expert. Return only valid JSON." },
-        { role: "user", content: prompt },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "business_profile",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              companyName: { type: "string" },
-              website: { type: "string" },
-              summary: { type: "string" },
-              valueProposition: { type: "string" },
-              currentSegments: { type: "array", items: { type: "string" } },
-              products: { type: "array", items: { type: "string" } },
-              proofPoints: { type: "array", items: { type: "string" } },
-              expansionCategories: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: { type: "string" },
-                    whyRelevant: { type: "string" },
-                    salesAngle: { type: "string" },
-                    painPoints: { type: "array", items: { type: "string" } },
-                    searchQueries: { type: "array", items: { type: "string" } },
-                  },
-                  required: ["name", "whyRelevant", "salesAngle", "painPoints", "searchQueries"],
-                  additionalProperties: false,
-                },
+    const parsed = await manusTask<any>(
+      prompt,
+      {
+        type: "object",
+        properties: {
+          companyName: { type: "string" },
+          website: { type: "string" },
+          summary: { type: "string" },
+          valueProposition: { type: "string" },
+          currentSegments: { type: "array", items: { type: "string" } },
+          products: { type: "array", items: { type: "string" } },
+          proofPoints: { type: "array", items: { type: "string" } },
+          expansionCategories: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                whyRelevant: { type: "string" },
+                salesAngle: { type: "string" },
+                painPoints: { type: "array", items: { type: "string" } },
+                searchQueries: { type: "array", items: { type: "string" } },
               },
+              required: ["name", "whyRelevant", "salesAngle", "painPoints", "searchQueries"],
+              additionalProperties: false,
             },
-            required: ["companyName", "website", "summary", "valueProposition", "currentSegments", "products", "proofPoints", "expansionCategories"],
-            additionalProperties: false,
           },
         },
+        required: ["companyName", "website", "summary", "valueProposition", "currentSegments", "products", "proofPoints", "expansionCategories"],
+        additionalProperties: false,
       },
-    });
+      {
+        timeoutMs: 180_000,
+        onProgress: (msg, detail, pct) => sseSend(res, { type: "progress", pct, message: msg, detail }),
+      }
+    );
 
-    sseSend(res, { type: "progress", pct: 85, message: "Extracting results...", detail: "Parsing AI output" });
-
-    const content_text = result.choices[0]?.message?.content;
-    let parsed: any;
-    if (typeof content_text === "string") {
-      const cleaned = content_text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      parsed = JSON.parse(cleaned);
-    } else {
-      throw new Error("No content in LLM response");
-    }
+    sseSend(res, { type: "progress", pct: 92, message: "Extracting results...", detail: "Parsing AI output" });
 
     sseSend(res, { type: "progress", pct: 95, message: "Complete!", detail: "Business profile ready" });
     sseSend(res, { type: "complete", result: parsed });
@@ -545,58 +530,41 @@ Return ONLY valid JSON (no markdown) with this structure:
   "memoriesUsed": ["which memories influenced this brief"]
 }`;
 
-    sseSend(res, { type: "progress", pct: 30, message: "AI generating brief...", detail: "Processing with LLM" });
+    sseSend(res, { type: "progress", pct: 30, message: "AI generating brief...", detail: "Processing with Manus" });
 
-    const result = await invokeLLM({
-      messages: [
-        { role: "system", content: "You are an expert B2B sales strategist. Return only valid JSON." },
-        { role: "user", content: prompt },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "meeting_brief",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              accountBrief: { type: "string" },
-              fitRationale: { type: "string" },
-              meetingPrep: { type: "string" },
-              discoveryQuestions: { type: "array", items: { type: "string" } },
-              objectionsAndResponses: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    objection: { type: "string" },
-                    response: { type: "string" },
-                  },
-                  required: ["objection", "response"],
-                  additionalProperties: false,
-                },
+    const parsed = await manusTask<any>(
+      prompt,
+      {
+        type: "object",
+        properties: {
+          accountBrief: { type: "string" },
+          fitRationale: { type: "string" },
+          meetingPrep: { type: "string" },
+          discoveryQuestions: { type: "array", items: { type: "string" } },
+          objectionsAndResponses: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                objection: { type: "string" },
+                response: { type: "string" },
               },
-              outreachEmailSubject: { type: "string" },
-              outreachEmailBody: { type: "string" },
-              memoriesUsed: { type: "array", items: { type: "string" } },
+              required: ["objection", "response"],
+              additionalProperties: false,
             },
-            required: ["accountBrief", "fitRationale", "meetingPrep", "discoveryQuestions", "objectionsAndResponses", "outreachEmailSubject", "outreachEmailBody", "memoriesUsed"],
-            additionalProperties: false,
           },
+          outreachEmailSubject: { type: "string" },
+          outreachEmailBody: { type: "string" },
+          memoriesUsed: { type: "array", items: { type: "string" } },
         },
+        required: ["accountBrief", "fitRationale", "meetingPrep", "discoveryQuestions", "objectionsAndResponses", "outreachEmailSubject", "outreachEmailBody", "memoriesUsed"],
+        additionalProperties: false,
       },
-    });
-
-    sseSend(res, { type: "progress", pct: 80, message: "Parsing results...", detail: "Extracting brief" });
-
-    const content_text = result.choices[0]?.message?.content;
-    let parsed: any;
-    if (typeof content_text === "string") {
-      const cleaned = content_text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      parsed = JSON.parse(cleaned);
-    } else {
-      throw new Error("No content in LLM response");
-    }
+      {
+        timeoutMs: 150_000,
+        onProgress: (msg, detail, pct) => sseSend(res, { type: "progress", pct, message: msg, detail }),
+      }
+    );
 
     sseSend(res, { type: "progress", pct: 95, message: "Complete!", detail: "Brief ready" });
     sseSend(res, { type: "complete", result: parsed });
@@ -694,81 +662,66 @@ Return ONLY valid JSON with this structure:
   "memoriesUsed": ["which memories influenced this"]
 }`;
 
-    const result = await invokeLLM({
-      messages: [
-        { role: "system", content: "You are an expert B2B sales strategist. Return only valid JSON." },
-        { role: "user", content: kitPrompt },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "sales_kit",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              accountBrief: { type: "string" },
-              whyRelevantNow: { type: "string" },
-              synergies: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    sellerProduct: { type: "string" },
-                    prospectPain: { type: "string" },
-                    evidence: { type: "string" },
-                  },
-                  required: ["sellerProduct", "prospectPain", "evidence"],
-                  additionalProperties: false,
-                },
+    const kit = await manusTask<any>(
+      kitPrompt,
+      {
+        type: "object",
+        properties: {
+          accountBrief: { type: "string" },
+          whyRelevantNow: { type: "string" },
+          synergies: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                sellerProduct: { type: "string" },
+                prospectPain: { type: "string" },
+                evidence: { type: "string" },
               },
-              suggestedAngle: { type: "string" },
-              outreachEmailSubject: { type: "string" },
-              outreachEmailBody: { type: "string" },
-              solutions: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    title: { type: "string" },
-                    description: { type: "string" },
-                  },
-                  required: ["title", "description"],
-                  additionalProperties: false,
-                },
-              },
-              whyThisProspect: { type: "array", items: { type: "string" } },
-              proofStats: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    number: { type: "string" },
-                    label: { type: "string" },
-                  },
-                  required: ["number", "label"],
-                  additionalProperties: false,
-                },
-              },
-              memoriesUsed: { type: "array", items: { type: "string" } },
+              required: ["sellerProduct", "prospectPain", "evidence"],
+              additionalProperties: false,
             },
-            required: ["accountBrief", "whyRelevantNow", "synergies", "suggestedAngle", "outreachEmailSubject", "outreachEmailBody", "solutions", "whyThisProspect", "proofStats", "memoriesUsed"],
-            additionalProperties: false,
           },
+          suggestedAngle: { type: "string" },
+          outreachEmailSubject: { type: "string" },
+          outreachEmailBody: { type: "string" },
+          solutions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                description: { type: "string" },
+              },
+              required: ["title", "description"],
+              additionalProperties: false,
+            },
+          },
+          whyThisProspect: { type: "array", items: { type: "string" } },
+          proofStats: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                number: { type: "string" },
+                label: { type: "string" },
+              },
+              required: ["number", "label"],
+              additionalProperties: false,
+            },
+          },
+          memoriesUsed: { type: "array", items: { type: "string" } },
         },
+        required: ["accountBrief", "whyRelevantNow", "synergies", "suggestedAngle", "outreachEmailSubject", "outreachEmailBody", "solutions", "whyThisProspect", "proofStats", "memoriesUsed"],
+        additionalProperties: false,
       },
-    });
+      {
+        timeoutMs: 180_000,
+        onProgress: (msg, detail, pct) => sseSend(res, { type: "progress", pct, message: msg, detail }),
+      }
+    );
 
-    sseSend(res, { type: "progress", pct: 80, message: "Processing results...", detail: "Finalizing sales kit" });
-
-    const content_text = result.choices[0]?.message?.content;
-    let kit: any;
-    if (typeof content_text === "string") {
-      const cleaned = content_text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      kit = JSON.parse(cleaned);
-    } else {
-      throw new Error("No content in LLM response");
-    }
+    sseSend(res, { type: "progress", pct: 90, message: "Processing results...", detail: "Finalizing sales kit" });
 
     sseSend(res, { type: "progress", pct: 95, message: "Complete!", detail: "Sales kit ready" });
     sseSend(res, {
@@ -1123,74 +1076,61 @@ Analyze the reviews and return ONLY valid JSON with this structure:
 
 Focus on NEGATIVE reviews and complaints. Extract 3-6 pain points. Map each to our solutions where possible. If reviews are mostly positive, still identify areas of improvement or gaps we can fill.`;
 
-    const result = await invokeLLM({
-      messages: [
-        { role: "system", content: "You are a competitive intelligence analyst. Extract pain points from reviews and map them to sales opportunities. Return only valid JSON." },
-        { role: "user", content: analysisPrompt },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "review_analysis",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              reviews: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    text: { type: "string" },
-                    rating: { type: "number" },
-                    source: { type: "string" },
-                    sentiment: { type: "string" },
-                  },
-                  required: ["text", "rating", "source", "sentiment"],
-                  additionalProperties: false,
-                },
-              },
-              painPoints: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    issue: { type: "string" },
-                    frequency: { type: "string" },
-                    severity: { type: "string" },
-                    evidence: { type: "string" },
-                  },
-                  required: ["issue", "frequency", "severity", "evidence"],
-                  additionalProperties: false,
-                },
-              },
-              solutionMapping: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    painPoint: { type: "string" },
-                    ourSolution: { type: "string" },
-                    talkingPoint: { type: "string" },
-                  },
-                  required: ["painPoint", "ourSolution", "talkingPoint"],
-                  additionalProperties: false,
-                },
-              },
-              summary: { type: "string" },
-            },
-            required: ["reviews", "painPoints", "solutionMapping", "summary"],
-            additionalProperties: false,
-          },
-        },
-      },
-    });
-
-    const rawContent = result.choices?.[0]?.message?.content;
-    const content = typeof rawContent === "string" ? rawContent : "{}";
     let analysis;
     try {
-      analysis = JSON.parse(content);
+      analysis = await manusTask<any>(
+        analysisPrompt,
+        {
+          type: "object",
+          properties: {
+            reviews: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  rating: { type: "number" },
+                  source: { type: "string" },
+                  sentiment: { type: "string" },
+                },
+                required: ["text", "rating", "source", "sentiment"],
+                additionalProperties: false,
+              },
+            },
+            painPoints: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  issue: { type: "string" },
+                  frequency: { type: "string" },
+                  severity: { type: "string" },
+                  evidence: { type: "string" },
+                },
+                required: ["issue", "frequency", "severity", "evidence"],
+                additionalProperties: false,
+              },
+            },
+            solutionMapping: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  painPoint: { type: "string" },
+                  ourSolution: { type: "string" },
+                  talkingPoint: { type: "string" },
+                },
+                required: ["painPoint", "ourSolution", "talkingPoint"],
+                additionalProperties: false,
+              },
+            },
+            summary: { type: "string" },
+          },
+          required: ["reviews", "painPoints", "solutionMapping", "summary"],
+          additionalProperties: false,
+        },
+        { timeoutMs: 120_000 }
+      );
     } catch {
       analysis = { reviews: [], painPoints: [], solutionMapping: [], summary: "Failed to analyze reviews." };
     }

@@ -212,10 +212,16 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
-const resolveApiUrl = () =>
-  ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-    : "https://forge.manus.im/v1/chat/completions";
+const resolveApiUrl = () => {
+  const base = ENV.forgeApiUrl?.trim();
+  if (!base) return "https://forge.manus.im/v1/chat/completions";
+  const stripped = base.replace(/\/$/, "");
+  // If the base URL already includes a version segment (e.g. /v2), append
+  // /chat/completions directly; otherwise follow the OpenAI convention of /v1/chat/completions.
+  return /\/v\d+$/.test(stripped)
+    ? `${stripped}/chat/completions`
+    : `${stripped}/v1/chat/completions`;
+};
 
 const assertApiKey = () => {
   if (!ENV.forgeApiKey) {
