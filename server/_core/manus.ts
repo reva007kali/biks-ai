@@ -9,6 +9,23 @@
 
 const BASE = "https://api.manus.ai/v2";
 
+function extractJson(text: string): unknown {
+  // Strip markdown code fences
+  const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+
+  // Try direct parse
+  try { return JSON.parse(cleaned); } catch {}
+
+  // Find the outermost JSON object in the text
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    try { return JSON.parse(cleaned.slice(start, end + 1)); } catch {}
+  }
+
+  return null;
+}
+
 export type ManusProgressFn = (message: string, detail: string, pct: number) => void;
 
 export type ManusTaskOptions = {
@@ -97,19 +114,27 @@ export async function manusTask<T>(
     const assistantMsg = msgs.find(m => m.type === "assistant_message");
     const structured = assistantMsg?.assistant_message?.structured_output_result;
 
-    if (structured?.success) return structured.value as T;
+    // Priority 1: structured output (most reliable)
+    if (structured?.success && structured.value != null) return structured.value as T;
 
-    // Fallback: try to parse raw text content
-    const content = assistantMsg?.assistant_message?.content;
-    if (content) {
-      const cleaned = content
-        .replace(/```json\n?/g, "")
-        .replace(/```\n?/g, "")
-        .trim();
-      return JSON.parse(cleaned) as T;
+    // Priority 2: structured output value even if success=false
+    if (structured?.value != null) {
+      try {
+        const v = typeof structured.value === "string" ? JSON.parse(structured.value) : structured.value;
+        return v as T;
+      } catch {}
     }
 
-    throw new Error("Manus: agent stopped but returned no output");
+    // Priority 3: extract JSON from raw text content
+    const content = assistantMsg?.assistant_message?.content;
+    if (content) {
+      const extracted = extractJson(content);
+      if (extracted != null) return extracted as T;
+    }
+
+    // Log raw messages for debugging
+    console.error("[Manus] Could not extract output. Raw messages:", JSON.stringify(msgs.slice(0, 3), null, 2));
+    throw new Error("Manus: agent stopped but returned no parseable output");
   }
 
   throw new Error(`Manus: timed out after ${Math.round(timeoutMs / 1000)}s`);
