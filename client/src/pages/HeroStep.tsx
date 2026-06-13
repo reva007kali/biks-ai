@@ -15,7 +15,7 @@ export default function HeroStep({ onComplete }: Props) {
     if (!url.trim()) return;
     setLoading(true);
     setError("");
-    setProgress({ pct: 0, message: "Starting analysis...", detail: "" });
+    setProgress({ pct: 5, message: "Fetching website...", detail: "" });
 
     try {
       const res = await fetch("/api/analyze-website", {
@@ -24,42 +24,43 @@ export default function HeroStep({ onComplete }: Props) {
         body: JSON.stringify({ url: url.trim().startsWith("http") ? url.trim() : `https://${url.trim()}` }),
       });
 
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Analysis failed");
+        setLoading(false);
+        return;
+      }
 
+      const { taskId } = await res.json();
+      setProgress({ pct: 30, message: "AI agent started...", detail: "Generating business profile" });
+
+      const startTime = Date.now();
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === "progress") {
-              setProgress({ pct: evt.pct, message: evt.message, detail: evt.detail || "" });
-            }
-            if (evt.type === "complete") {
-              onComplete(evt.result);
-              return;
-            }
-            if (evt.type === "error") {
-              setError(evt.message);
-              setLoading(false);
-              return;
-            }
-          } catch {}
+        if (Date.now() - startTime > 180_000) {
+          setError("Analysis timed out after 3 minutes. Please try again.");
+          setLoading(false);
+          break;
         }
+        await new Promise(r => setTimeout(r, 3000));
+        try {
+          const pollRes = await fetch(`/api/poll-task?id=${taskId}`);
+          const status = await pollRes.json();
+          if (status.status === "done") {
+            onComplete(status.result);
+            return;
+          }
+          if (status.status === "error") {
+            setError(status.message || "Analysis failed");
+            setLoading(false);
+            break;
+          }
+          setProgress({ pct: status.pct || 50, message: status.message || "Processing...", detail: status.detail || "" });
+        } catch {}
       }
     } catch (e: any) {
       setError(e.message || "Analysis failed");
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (

@@ -139,3 +139,100 @@ export async function manusTask<T>(
 
   throw new Error(`Manus: timed out after ${Math.round(timeoutMs / 1000)}s`);
 }
+
+// ============================================================
+// Task-based helpers for Vercel (no long-running server loop)
+// ============================================================
+
+export async function startManusTask(
+  prompt: string,
+  schema: Record<string, unknown>,
+): Promise<string> {
+  const apiKey = process.env.MANUS_API_KEY;
+  if (!apiKey) throw new Error("MANUS_API_KEY is not configured");
+
+  const hdrs = { "Content-Type": "application/json", "x-manus-api-key": apiKey };
+  const createRes = await fetch(`${BASE}/task.create`, {
+    method: "POST",
+    headers: hdrs,
+    body: JSON.stringify({ message: { content: prompt }, structured_output_schema: schema }),
+  });
+
+  if (!createRes.ok) {
+    const txt = await createRes.text().catch(() => "");
+    throw new Error(`Manus task.create failed (${createRes.status}): ${txt}`);
+  }
+
+  const created: any = await createRes.json();
+  if (!created.ok) throw new Error(`Manus: ${created.error?.message ?? "task.create error"}`);
+
+  return created.task_id as string;
+}
+
+export type ManusTaskStatus =
+  | { status: "running"; pct: number; message: string; detail: string }
+  | { status: "done"; result: unknown }
+  | { status: "error"; message: string };
+
+export async function checkManusTask(taskId: string): Promise<ManusTaskStatus> {
+  const apiKey = process.env.MANUS_API_KEY;
+  if (!apiKey) throw new Error("MANUS_API_KEY is not configured");
+
+  const hdrs = { "Content-Type": "application/json", "x-manus-api-key": apiKey };
+  const pollRes = await fetch(
+    `${BASE}/task.listMessages?task_id=${encodeURIComponent(taskId)}&order=desc&limit=20`,
+    { headers: hdrs },
+  );
+
+  if (pollRes.status === 404) {
+    return { status: "running", pct: 10, message: "Starting...", detail: "Task is initializing" };
+  }
+
+  if (!pollRes.ok) {
+    const txt = await pollRes.text().catch(() => "");
+    throw new Error(`Manus poll failed (${pollRes.status}): ${txt}`);
+  }
+
+  const poll: any = await pollRes.json();
+  if (!poll.ok) throw new Error(`Manus poll error: ${poll.error?.message}`);
+
+  const msgs: any[] = poll.messages ?? [];
+  const statusEvent = msgs.find(m => m.type === "status_update");
+  const agentStatus = statusEvent?.status_update?.agent_status;
+
+  if (!agentStatus || agentStatus === "running" || agentStatus === "waiting") {
+    const message = statusEvent?.status_update?.brief ?? "Manus is working...";
+    const detail = statusEvent?.status_update?.description ?? "Processing";
+    return { status: "running", pct: 50, message, detail };
+  }
+
+  if (agentStatus === "error") {
+    return { status: "error", message: "Manus agent reported an error" };
+  }
+
+  if (agentStatus === "stopped") {
+    const structuredMsg = msgs.find(m => m.type === "structured_output_result");
+    if (structuredMsg?.structured_output_result?.success && structuredMsg.structured_output_result.value != null) {
+      return { status: "done", result: structuredMsg.structured_output_result.value };
+    }
+
+    const assistantMsg = msgs.find(m => m.type === "assistant_message");
+    const nested = assistantMsg?.assistant_message?.structured_output_result;
+    if (nested?.value != null) {
+      try {
+        const v = typeof nested.value === "string" ? JSON.parse(nested.value) : nested.value;
+        return { status: "done", result: v };
+      } catch {}
+    }
+
+    const content = assistantMsg?.assistant_message?.content;
+    if (content) {
+      const extracted = extractJson(content);
+      if (extracted != null) return { status: "done", result: extracted };
+    }
+
+    return { status: "error", message: "Agent stopped but returned no parseable output" };
+  }
+
+  return { status: "running", pct: 20, message: "Agent status unknown", detail: `Status: ${agentStatus}` };
+}

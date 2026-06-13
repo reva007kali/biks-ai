@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { ENV } from "./_core/env";
-import { manusTask } from "./_core/manus";
+import { manusTask, startManusTask, checkManusTask } from "./_core/manus";
 
 const api = Router();
 
@@ -20,22 +20,17 @@ function sseSend(res: Response, data: object) {
 }
 
 // ============================================================
-// POST /api/analyze-website — SSE streaming website analysis
+// POST /api/analyze-website — fetch website then start Manus task, return taskId
 // ============================================================
 api.post("/api/analyze-website", async (req: Request, res: Response) => {
-  sseHeaders(res);
   const { url } = req.body;
 
   if (!url) {
-    sseSend(res, { type: "error", message: "URL is required" });
-    res.end();
-    return;
+    return res.status(400).json({ error: "URL is required" });
   }
 
   try {
-    sseSend(res, { type: "progress", pct: 5, message: "Fetching website content...", detail: "Downloading page" });
-
-    // Fetch website content with retry
+    // Fetch website content (fast, done server-side before creating task)
     let html = "";
     const fetchWithTimeout = async (targetUrl: string, timeoutMs: number) => {
       const controller = new AbortController();
@@ -57,20 +52,15 @@ api.post("/api/analyze-website", async (req: Request, res: Response) => {
     };
 
     try {
-      html = await fetchWithTimeout(url, 30000);
-    } catch (e: any) {
-      // Retry once with longer timeout
-      sseSend(res, { type: "progress", pct: 10, message: "Retrying connection...", detail: "First attempt timed out, retrying" });
+      html = await fetchWithTimeout(url, 20000);
+    } catch {
       try {
-        html = await fetchWithTimeout(url, 45000);
+        html = await fetchWithTimeout(url, 30000);
       } catch (e2: any) {
-        sseSend(res, { type: "error", message: `Failed to fetch website: ${e2.message}. The site may be slow or blocking automated requests.` });
-        res.end();
-        return;
+        return res.status(502).json({ error: `Failed to fetch website: ${e2.message}` });
       }
     }
 
-    // Strip HTML tags
     const content = html
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
@@ -78,8 +68,6 @@ api.post("/api/analyze-website", async (req: Request, res: Response) => {
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 4000);
-
-    sseSend(res, { type: "progress", pct: 25, message: "Analyzing business...", detail: "AI is processing website content" });
 
     const prompt = `You are analyzing a business website for a B2B sales development tool.
 All website content is already provided below — do NOT browse the web or visit any URLs.
@@ -110,53 +98,40 @@ Based ONLY on the content above, return ONLY valid JSON (no markdown, no code bl
 
 Generate 4-5 expansion categories. Focus on premium B2B segments.`;
 
-    sseSend(res, { type: "progress", pct: 40, message: "AI agent started...", detail: "Generating business profile" });
-
-    const parsed = await manusTask<any>(
-      prompt,
-      {
-        type: "object",
-        properties: {
-          companyName: { type: "string" },
-          website: { type: "string" },
-          summary: { type: "string" },
-          valueProposition: { type: "string" },
-          currentSegments: { type: "array", items: { type: "string" } },
-          products: { type: "array", items: { type: "string" } },
-          proofPoints: { type: "array", items: { type: "string" } },
-          expansionCategories: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                whyRelevant: { type: "string" },
-                salesAngle: { type: "string" },
-                painPoints: { type: "array", items: { type: "string" } },
-                searchQueries: { type: "array", items: { type: "string" } },
-              },
-              required: ["name", "whyRelevant", "salesAngle", "painPoints", "searchQueries"],
-              additionalProperties: false,
+    const taskId = await startManusTask(prompt, {
+      type: "object",
+      properties: {
+        companyName: { type: "string" },
+        website: { type: "string" },
+        summary: { type: "string" },
+        valueProposition: { type: "string" },
+        currentSegments: { type: "array", items: { type: "string" } },
+        products: { type: "array", items: { type: "string" } },
+        proofPoints: { type: "array", items: { type: "string" } },
+        expansionCategories: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              whyRelevant: { type: "string" },
+              salesAngle: { type: "string" },
+              painPoints: { type: "array", items: { type: "string" } },
+              searchQueries: { type: "array", items: { type: "string" } },
             },
+            required: ["name", "whyRelevant", "salesAngle", "painPoints", "searchQueries"],
+            additionalProperties: false,
           },
         },
-        required: ["companyName", "website", "summary", "valueProposition", "currentSegments", "products", "proofPoints", "expansionCategories"],
-        additionalProperties: false,
       },
-      {
-        timeoutMs: 180_000,
-        onProgress: (msg, detail, pct) => sseSend(res, { type: "progress", pct, message: msg, detail }),
-      }
-    );
+      required: ["companyName", "website", "summary", "valueProposition", "currentSegments", "products", "proofPoints", "expansionCategories"],
+      additionalProperties: false,
+    });
 
-    sseSend(res, { type: "progress", pct: 92, message: "Extracting results...", detail: "Parsing AI output" });
-
-    sseSend(res, { type: "progress", pct: 95, message: "Complete!", detail: "Business profile ready" });
-    sseSend(res, { type: "complete", result: parsed });
+    return res.json({ taskId });
   } catch (e: any) {
-    sseSend(res, { type: "error", message: e.message || "Analysis failed" });
+    return res.status(500).json({ error: e.message || "Analysis failed" });
   }
-  res.end();
 });
 
 // ============================================================
@@ -480,21 +455,16 @@ function extractTitle(summary: string): string {
 }
 
 // ============================================================
-// POST /api/generate-brief — SSE streaming sales kit generation
+// POST /api/generate-brief — start Manus task, return taskId
 // ============================================================
 api.post("/api/generate-brief", async (req: Request, res: Response) => {
-  sseHeaders(res);
   const { business, lead, memories } = req.body;
 
   if (!business || !lead) {
-    sseSend(res, { type: "error", message: "business and lead are required" });
-    res.end();
-    return;
+    return res.status(400).json({ error: "business and lead are required" });
   }
 
   try {
-    sseSend(res, { type: "progress", pct: 10, message: "Preparing brief...", detail: "Gathering context" });
-
     const memoryText = Array.isArray(memories) && memories.length > 0
       ? memories.map((m: string, i: number) => `${i + 1}. ${m}`).join("\n")
       : "None saved.";
@@ -530,67 +500,51 @@ Return ONLY valid JSON (no markdown) with this structure:
   "memoriesUsed": ["which memories influenced this brief"]
 }`;
 
-    sseSend(res, { type: "progress", pct: 30, message: "AI generating brief...", detail: "Processing with Manus" });
-
-    const parsed = await manusTask<any>(
-      prompt,
-      {
-        type: "object",
-        properties: {
-          accountBrief: { type: "string" },
-          fitRationale: { type: "string" },
-          meetingPrep: { type: "string" },
-          discoveryQuestions: { type: "array", items: { type: "string" } },
-          objectionsAndResponses: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                objection: { type: "string" },
-                response: { type: "string" },
-              },
-              required: ["objection", "response"],
-              additionalProperties: false,
+    const taskId = await startManusTask(prompt, {
+      type: "object",
+      properties: {
+        accountBrief: { type: "string" },
+        fitRationale: { type: "string" },
+        meetingPrep: { type: "string" },
+        discoveryQuestions: { type: "array", items: { type: "string" } },
+        objectionsAndResponses: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              objection: { type: "string" },
+              response: { type: "string" },
             },
+            required: ["objection", "response"],
+            additionalProperties: false,
           },
-          outreachEmailSubject: { type: "string" },
-          outreachEmailBody: { type: "string" },
-          memoriesUsed: { type: "array", items: { type: "string" } },
         },
-        required: ["accountBrief", "fitRationale", "meetingPrep", "discoveryQuestions", "objectionsAndResponses", "outreachEmailSubject", "outreachEmailBody", "memoriesUsed"],
-        additionalProperties: false,
+        outreachEmailSubject: { type: "string" },
+        outreachEmailBody: { type: "string" },
+        memoriesUsed: { type: "array", items: { type: "string" } },
       },
-      {
-        timeoutMs: 150_000,
-        onProgress: (msg, detail, pct) => sseSend(res, { type: "progress", pct, message: msg, detail }),
-      }
-    );
+      required: ["accountBrief", "fitRationale", "meetingPrep", "discoveryQuestions", "objectionsAndResponses", "outreachEmailSubject", "outreachEmailBody", "memoriesUsed"],
+      additionalProperties: false,
+    });
 
-    sseSend(res, { type: "progress", pct: 95, message: "Complete!", detail: "Brief ready" });
-    sseSend(res, { type: "complete", result: parsed });
+    return res.json({ taskId });
   } catch (e: any) {
-    sseSend(res, { type: "error", message: e.message || "Brief generation failed" });
+    return res.status(500).json({ error: e.message || "Brief generation failed" });
   }
-  res.end();
 });
 
 // ============================================================
-// POST /api/generate-sales-kit — SSE streaming sales kit generation
+// POST /api/generate-sales-kit — fetch prospect site then start Manus task, return taskId
 // ============================================================
 api.post("/api/generate-sales-kit", async (req: Request, res: Response) => {
-  sseHeaders(res);
   const { business, lead, memories, reviewPainPoints } = req.body;
 
   if (!business || !lead) {
-    sseSend(res, { type: "error", message: "business and lead are required" });
-    res.end();
-    return;
+    return res.status(400).json({ error: "business and lead are required" });
   }
 
   try {
-    // Phase 1: Fetch prospect website for context
-    sseSend(res, { type: "progress", pct: 10, message: "Researching prospect...", detail: "Fetching prospect website" });
-
+    // Fetch prospect website content (fast, done before creating task)
     let prospectContent = "";
     try {
       const prospectRes = await fetch(lead.url, {
@@ -607,9 +561,6 @@ api.post("/api/generate-sales-kit", async (req: Request, res: Response) => {
         .slice(0, 3000);
     } catch {}
 
-    sseSend(res, { type: "progress", pct: 30, message: "Generating sales kit...", detail: "AI analyzing synergies" });
-
-    // Phase 2: Generate the sales kit via LLM
     const memoryText = Array.isArray(memories) && memories.length > 0
       ? memories.map((m: string, i: number) => `${i + 1}. ${m}`).join("\n")
       : "None saved.";
@@ -662,87 +613,62 @@ Return ONLY valid JSON with this structure:
   "memoriesUsed": ["which memories influenced this"]
 }`;
 
-    const kit = await manusTask<any>(
-      kitPrompt,
-      {
-        type: "object",
-        properties: {
-          accountBrief: { type: "string" },
-          whyRelevantNow: { type: "string" },
-          synergies: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                sellerProduct: { type: "string" },
-                prospectPain: { type: "string" },
-                evidence: { type: "string" },
-              },
-              required: ["sellerProduct", "prospectPain", "evidence"],
-              additionalProperties: false,
+    const taskId = await startManusTask(kitPrompt, {
+      type: "object",
+      properties: {
+        accountBrief: { type: "string" },
+        whyRelevantNow: { type: "string" },
+        synergies: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              sellerProduct: { type: "string" },
+              prospectPain: { type: "string" },
+              evidence: { type: "string" },
             },
+            required: ["sellerProduct", "prospectPain", "evidence"],
+            additionalProperties: false,
           },
-          suggestedAngle: { type: "string" },
-          outreachEmailSubject: { type: "string" },
-          outreachEmailBody: { type: "string" },
-          solutions: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                title: { type: "string" },
-                description: { type: "string" },
-              },
-              required: ["title", "description"],
-              additionalProperties: false,
-            },
-          },
-          whyThisProspect: { type: "array", items: { type: "string" } },
-          proofStats: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                number: { type: "string" },
-                label: { type: "string" },
-              },
-              required: ["number", "label"],
-              additionalProperties: false,
-            },
-          },
-          memoriesUsed: { type: "array", items: { type: "string" } },
         },
-        required: ["accountBrief", "whyRelevantNow", "synergies", "suggestedAngle", "outreachEmailSubject", "outreachEmailBody", "solutions", "whyThisProspect", "proofStats", "memoriesUsed"],
-        additionalProperties: false,
+        suggestedAngle: { type: "string" },
+        outreachEmailSubject: { type: "string" },
+        outreachEmailBody: { type: "string" },
+        solutions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              description: { type: "string" },
+            },
+            required: ["title", "description"],
+            additionalProperties: false,
+          },
+        },
+        whyThisProspect: { type: "array", items: { type: "string" } },
+        proofStats: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              number: { type: "string" },
+              label: { type: "string" },
+            },
+            required: ["number", "label"],
+            additionalProperties: false,
+          },
+        },
+        memoriesUsed: { type: "array", items: { type: "string" } },
       },
-      {
-        timeoutMs: 180_000,
-        onProgress: (msg, detail, pct) => sseSend(res, { type: "progress", pct, message: msg, detail }),
-      }
-    );
-
-    sseSend(res, { type: "progress", pct: 90, message: "Processing results...", detail: "Finalizing sales kit" });
-
-    sseSend(res, { type: "progress", pct: 95, message: "Complete!", detail: "Sales kit ready" });
-    sseSend(res, {
-      type: "complete",
-      result: {
-        accountBrief: kit.accountBrief,
-        whyRelevantNow: kit.whyRelevantNow,
-        synergies: kit.synergies,
-        suggestedAngle: kit.suggestedAngle,
-        outreachEmailSubject: kit.outreachEmailSubject,
-        outreachEmailBody: kit.outreachEmailBody,
-        solutions: kit.solutions,
-        whyThisProspect: kit.whyThisProspect,
-        proofStats: kit.proofStats,
-        memoriesUsed: kit.memoriesUsed,
-      },
+      required: ["accountBrief", "whyRelevantNow", "synergies", "suggestedAngle", "outreachEmailSubject", "outreachEmailBody", "solutions", "whyThisProspect", "proofStats", "memoriesUsed"],
+      additionalProperties: false,
     });
+
+    return res.json({ taskId });
   } catch (e: any) {
-    sseSend(res, { type: "error", message: e.message || "Sales kit generation failed" });
+    return res.status(500).json({ error: e.message || "Sales kit generation failed" });
   }
-  res.end();
 });
 
 // ============================================================
@@ -962,17 +888,33 @@ api.post("/api/send-kit-email", async (req: Request, res: Response) => {
 });
 
 // ============================================================
+// GET /api/poll-task — Check status of a Manus task (Vercel-compatible polling)
+// ============================================================
+api.get("/api/poll-task", async (req: Request, res: Response) => {
+  const { id } = req.query;
+  if (!id || typeof id !== "string") {
+    return res.status(400).json({ error: "id is required" });
+  }
+  try {
+    const status = await checkManusTask(id);
+    return res.json(status);
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
 // POST /api/scrape-reviews — Fetch & analyze Google Reviews of prospect
 // ============================================================
 api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
-  const exaKey = process.env.EXA_API_KEY;
-  if (!exaKey) {
-    return res.status(500).json({ error: "Exa not configured" });
-  }
-
   const { leadName, leadUrl, sellerProducts, sellerSummary } = req.body;
   if (!leadName) {
     return res.status(400).json({ error: "leadName is required" });
+  }
+
+  const exaKey = process.env.EXA_API_KEY;
+  if (!exaKey) {
+    return res.status(500).json({ error: "Exa not configured" });
   }
 
   try {
@@ -1076,66 +1018,56 @@ Analyze the reviews and return ONLY valid JSON with this structure:
 
 Focus on NEGATIVE reviews and complaints. Extract 3-6 pain points. Map each to our solutions where possible. If reviews are mostly positive, still identify areas of improvement or gaps we can fill.`;
 
-    let analysis;
-    try {
-      analysis = await manusTask<any>(
-        analysisPrompt,
-        {
-          type: "object",
-          properties: {
-            reviews: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  text: { type: "string" },
-                  rating: { type: "number" },
-                  source: { type: "string" },
-                  sentiment: { type: "string" },
-                },
-                required: ["text", "rating", "source", "sentiment"],
-                additionalProperties: false,
-              },
+    const taskId = await startManusTask(analysisPrompt, {
+      type: "object",
+      properties: {
+        reviews: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string" },
+              rating: { type: "number" },
+              source: { type: "string" },
+              sentiment: { type: "string" },
             },
-            painPoints: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  issue: { type: "string" },
-                  frequency: { type: "string" },
-                  severity: { type: "string" },
-                  evidence: { type: "string" },
-                },
-                required: ["issue", "frequency", "severity", "evidence"],
-                additionalProperties: false,
-              },
-            },
-            solutionMapping: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  painPoint: { type: "string" },
-                  ourSolution: { type: "string" },
-                  talkingPoint: { type: "string" },
-                },
-                required: ["painPoint", "ourSolution", "talkingPoint"],
-                additionalProperties: false,
-              },
-            },
-            summary: { type: "string" },
+            required: ["text", "rating", "source", "sentiment"],
+            additionalProperties: false,
           },
-          required: ["reviews", "painPoints", "solutionMapping", "summary"],
-          additionalProperties: false,
         },
-        { timeoutMs: 120_000 }
-      );
-    } catch {
-      analysis = { reviews: [], painPoints: [], solutionMapping: [], summary: "Failed to analyze reviews." };
-    }
-
-    return res.json(analysis);
+        painPoints: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              issue: { type: "string" },
+              frequency: { type: "string" },
+              severity: { type: "string" },
+              evidence: { type: "string" },
+            },
+            required: ["issue", "frequency", "severity", "evidence"],
+            additionalProperties: false,
+          },
+        },
+        solutionMapping: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              painPoint: { type: "string" },
+              ourSolution: { type: "string" },
+              talkingPoint: { type: "string" },
+            },
+            required: ["painPoint", "ourSolution", "talkingPoint"],
+            additionalProperties: false,
+          },
+        },
+        summary: { type: "string" },
+      },
+      required: ["reviews", "painPoints", "solutionMapping", "summary"],
+      additionalProperties: false,
+    });
+    return res.json({ taskId });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }

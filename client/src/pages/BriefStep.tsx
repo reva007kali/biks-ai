@@ -84,7 +84,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   };
 
   const fetchReviews = async () => {
-    if (reviewAnalysis) return; // Already fetched
+    if (reviewAnalysis) return;
     setReviewsLoading(true);
     setReviewsError("");
     try {
@@ -99,10 +99,29 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         }),
       });
       const data = await res.json();
-      if (data && !data.error) {
-        setReviewAnalysis(data);
-      } else if (data?.error) {
+      if (data.error) {
         setReviewsError(data.error);
+        setReviewsLoading(false);
+        return;
+      }
+      const { taskId } = data;
+      const startTime = Date.now();
+      while (true) {
+        if (Date.now() - startTime > 120_000) {
+          setReviewsError("Review analysis timed out");
+          break;
+        }
+        await new Promise(r => setTimeout(r, 3000));
+        const pollRes = await fetch(`/api/poll-task?id=${taskId}`);
+        const status = await pollRes.json();
+        if (status.status === "done") {
+          setReviewAnalysis(status.result as ReviewAnalysis);
+          break;
+        }
+        if (status.status === "error") {
+          setReviewsError(status.message || "Review analysis failed");
+          break;
+        }
       }
     } catch (e: any) {
       setReviewsError(e.message || "Failed to fetch reviews");
@@ -112,7 +131,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 
   const generateBrief = async () => {
     setLoading(true);
-    setProgress({ pct: 0, message: "Starting...", detail: "" });
+    setProgress({ pct: 10, message: "Starting...", detail: "" });
 
     try {
       const res = await fetch("/api/generate-brief", {
@@ -125,37 +144,19 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         }),
       });
 
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      if (!res.ok) { setLoading(false); return; }
+      const { taskId } = await res.json();
+      setProgress({ pct: 30, message: "AI generating brief...", detail: "Processing with Manus" });
 
+      const startTime = Date.now();
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === "progress") {
-              setProgress({ pct: evt.pct, message: evt.message, detail: evt.detail || "" });
-            }
-            if (evt.type === "complete") {
-              setBrief(evt.result);
-              setLoading(false);
-              return;
-            }
-            if (evt.type === "error") {
-              setLoading(false);
-              return;
-            }
-          } catch {}
-        }
+        if (Date.now() - startTime > 150_000) { setLoading(false); break; }
+        await new Promise(r => setTimeout(r, 3000));
+        const pollRes = await fetch(`/api/poll-task?id=${taskId}`);
+        const status = await pollRes.json();
+        if (status.status === "done") { setBrief(status.result); setLoading(false); return; }
+        if (status.status === "error") { setLoading(false); break; }
+        setProgress({ pct: status.pct || 50, message: status.message || "Processing...", detail: status.detail || "" });
       }
     } catch {}
     setLoading(false);
@@ -163,7 +164,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 
   const generateSalesKit = async () => {
     setKitLoading(true);
-    setKitProgress({ pct: 0, message: "Starting sales kit...", detail: "" });
+    setKitProgress({ pct: 10, message: "Starting sales kit...", detail: "" });
 
     try {
       const res = await fetch("/api/generate-sales-kit", {
@@ -177,37 +178,19 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         }),
       });
 
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      if (!res.ok) { setKitLoading(false); return; }
+      const { taskId } = await res.json();
+      setKitProgress({ pct: 30, message: "Generating sales kit...", detail: "AI analyzing synergies" });
 
+      const startTime = Date.now();
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === "progress") {
-              setKitProgress({ pct: evt.pct, message: evt.message, detail: evt.detail || "" });
-            }
-            if (evt.type === "complete") {
-              setSalesKit(evt.result);
-              setKitLoading(false);
-              return;
-            }
-            if (evt.type === "error") {
-              setKitLoading(false);
-              return;
-            }
-          } catch {}
-        }
+        if (Date.now() - startTime > 180_000) { setKitLoading(false); break; }
+        await new Promise(r => setTimeout(r, 3000));
+        const pollRes = await fetch(`/api/poll-task?id=${taskId}`);
+        const status = await pollRes.json();
+        if (status.status === "done") { setSalesKit(status.result); setKitLoading(false); return; }
+        if (status.status === "error") { setKitLoading(false); break; }
+        setKitProgress({ pct: status.pct || 50, message: status.message || "Processing...", detail: status.detail || "" });
       }
     } catch {}
     setKitLoading(false);
