@@ -1,10 +1,32 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { BusinessProfile, Lead, MemoryItem, Contact } from "../App";
+
+const GOOGLE_MAPS_COUNTRY_OPTIONS = [
+  "Singapore",
+  "Indonesia",
+  "Malaysia",
+  "Thailand",
+  "Vietnam",
+  "Philippines",
+  "Australia",
+] as const;
+
+const GOOGLE_MAPS_BUSINESS_TYPE_OPTIONS = [
+  { value: "spa", label: "Spa" },
+  { value: "wellness center", label: "Wellness Center" },
+  { value: "hotel spa", label: "Hotel Spa" },
+  { value: "sauna", label: "Sauna" },
+  { value: "jacuzzi", label: "Jacuzzi" },
+  { value: "recovery center", label: "Recovery Center" },
+  { value: "cold plunge", label: "Cold Plunge" },
+  { value: "swimming pool facility", label: "Swimming Pool Facility" },
+] as const;
 
 type ReviewOpportunity = {
   businessName: string;
   location: string;
   sourceUrl: string;
+  googleMapsUrl: string;
   rating: number | null;
   reviewCount: number | null;
   problemDetected: string;
@@ -19,6 +41,15 @@ type ReviewOpportunity = {
 type ReviewOpportunityResponse = {
   sourceMode: "live" | "fallback";
   results: ReviewOpportunity[];
+  liveFailureReason?: string;
+};
+
+type ReviewOpportunityTask = {
+  taskId: string;
+  status: "running" | "waiting" | "stopped" | "failed";
+  lastUpdatedAt: string;
+  sourceMode?: "live" | "fallback";
+  liveFailureReason?: string;
 };
 
 interface Props {
@@ -45,6 +76,66 @@ export default function AccountsStep({
   const [reviewOpportunityLoading, setReviewOpportunityLoading] = useState(false);
   const [reviewOpportunityError, setReviewOpportunityError] = useState("");
   const [reviewOpportunityData, setReviewOpportunityData] = useState<ReviewOpportunityResponse | null>(null);
+  const [reviewOpportunityTask, setReviewOpportunityTask] = useState<ReviewOpportunityTask | null>(null);
+  const [reviewOpportunityCountry, setReviewOpportunityCountry] = useState<string>("Singapore");
+  const [reviewOpportunityCustomCountry, setReviewOpportunityCustomCountry] = useState("");
+  const [reviewOpportunityBusinessType, setReviewOpportunityBusinessType] = useState<string>("spa");
+
+  useEffect(() => {
+    if (!reviewOpportunityTask || (reviewOpportunityTask.status !== "running" && reviewOpportunityTask.status !== "waiting")) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollTaskStatus = async () => {
+      try {
+        const res = await fetch(`/api/review-opportunities/status?taskId=${encodeURIComponent(reviewOpportunityTask.taskId)}`);
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Failed to check review opportunity status");
+        }
+
+        if (cancelled) return;
+
+        setReviewOpportunityTask({
+          taskId: data.taskId,
+          status: data.status,
+          lastUpdatedAt: data.lastUpdatedAt,
+          sourceMode: data.sourceMode,
+          liveFailureReason: data.liveFailureReason,
+        });
+
+        if (Array.isArray(data.results)) {
+          setReviewOpportunityData({
+            sourceMode: data.sourceMode || "live",
+            results: data.results,
+            liveFailureReason: data.liveFailureReason,
+          });
+        }
+
+        if (data.status === "failed") {
+          setReviewOpportunityError(data.liveFailureReason || "Review opportunity research failed");
+          setReviewOpportunityLoading(false);
+        } else if (data.status === "stopped") {
+          setReviewOpportunityError("");
+          setReviewOpportunityLoading(false);
+        }
+      } catch (error: any) {
+        if (cancelled) return;
+        setReviewOpportunityError(error.message || "Failed to check review opportunity status");
+        setReviewOpportunityLoading(false);
+      }
+    };
+
+    pollTaskStatus();
+    const intervalId = window.setInterval(pollTaskStatus, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [reviewOpportunityTask]);
 
   const searchLeads = async () => {
     setSearching(true);
@@ -130,14 +221,27 @@ export default function AccountsStep({
   const findReviewOpportunities = async () => {
     setReviewOpportunityLoading(true);
     setReviewOpportunityError("");
+    setReviewOpportunityData(null);
+    setReviewOpportunityTask(null);
+
+    const selectedCountry =
+      reviewOpportunityCountry === "Custom"
+        ? reviewOpportunityCustomCountry.trim()
+        : reviewOpportunityCountry;
+
+    if (!selectedCountry) {
+      setReviewOpportunityError("Please select or enter a country.");
+      setReviewOpportunityLoading(false);
+      return;
+    }
 
     try {
       const res = await fetch("/api/review-opportunities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          country: "Singapore",
-          businessTypes: ["spa", "wellness", "medical spa", "recovery center", "athletic recovery club", "resort spa"],
+          country: selectedCountry,
+          businessTypes: [reviewOpportunityBusinessType],
           memories: memories.map(memory => memory.text),
         }),
       });
@@ -145,12 +249,15 @@ export default function AccountsStep({
       if (!res.ok) {
         throw new Error(data.error || "Failed to discover opportunities");
       }
-      setReviewOpportunityData(data);
+      setReviewOpportunityTask({
+        taskId: data.taskId,
+        status: data.status,
+        lastUpdatedAt: data.lastUpdatedAt,
+      });
     } catch (error: any) {
       setReviewOpportunityError(error.message || "Failed to discover opportunities");
+      setReviewOpportunityLoading(false);
     }
-
-    setReviewOpportunityLoading(false);
   };
 
   return (
@@ -266,13 +373,89 @@ export default function AccountsStep({
           padding: "18px 20px",
           marginBottom: 24,
         }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#7d97d9", marginBottom: 8 }}>
+                Country
+              </div>
+              <select
+                value={reviewOpportunityCountry}
+                onChange={(e) => setReviewOpportunityCountry(e.target.value)}
+                style={{
+                  width: "100%",
+                  background: "#1a1f2b",
+                  border: "1px solid #2c3b5f",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                  fontSize: 13,
+                  color: "#f0f4ff",
+                  outline: "none",
+                  fontFamily: "'Inter', sans-serif",
+                }}
+              >
+                {GOOGLE_MAPS_COUNTRY_OPTIONS.map((countryOption) => (
+                  <option key={countryOption} value={countryOption}>
+                    {countryOption}
+                  </option>
+                ))}
+                <option value="Custom">Custom</option>
+              </select>
+              {reviewOpportunityCountry === "Custom" && (
+                <input
+                  value={reviewOpportunityCustomCountry}
+                  onChange={(e) => setReviewOpportunityCustomCountry(e.target.value)}
+                  placeholder="Enter country"
+                  style={{
+                    width: "100%",
+                    marginTop: 8,
+                    background: "#1a1f2b",
+                    border: "1px solid #2c3b5f",
+                    borderRadius: 8,
+                    padding: "10px 12px",
+                    fontSize: 13,
+                    color: "#f0f4ff",
+                    outline: "none",
+                    fontFamily: "'Inter', sans-serif",
+                  }}
+                />
+              )}
+            </div>
+
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#7d97d9", marginBottom: 8 }}>
+                Business Type
+              </div>
+              <select
+                value={reviewOpportunityBusinessType}
+                onChange={(e) => setReviewOpportunityBusinessType(e.target.value)}
+                style={{
+                  width: "100%",
+                  background: "#1a1f2b",
+                  border: "1px solid #2c3b5f",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                  fontSize: 13,
+                  color: "#f0f4ff",
+                  outline: "none",
+                  fontFamily: "'Inter', sans-serif",
+                }}
+              >
+                {GOOGLE_MAPS_BUSINESS_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#7d97d9", marginBottom: 6 }}>
-                Review-Based Opportunity Discovery
+                Google Maps Opportunity Discovery
               </div>
               <div style={{ fontSize: 13, color: "#b9c8e8", lineHeight: 1.5, maxWidth: 720 }}>
-                Search Google Maps businesses, inspect public review complaints, and detect Moncol opportunities from water, dirty, and filter signals.
+                Search Google Maps businesses, inspect Google Maps review snippets, and detect Moncol opportunities from water quality, cleanliness, filter, hygiene, and maintenance signals.
               </div>
             </div>
             <button
@@ -291,14 +474,23 @@ export default function AccountsStep({
                 whiteSpace: "nowrap",
               }}
             >
-              {reviewOpportunityLoading ? "Scanning..." : "Find Review-Based Opportunities"}
+              {reviewOpportunityLoading ? "Researching..." : "Find Opportunities"}
             </button>
           </div>
 
-          {reviewOpportunityLoading && (
-            <p style={{ marginTop: 12, fontSize: 13, color: "#d9e6ff" }}>
-              Scanning public reviews for water, dirty, and filter signals...
-            </p>
+          {reviewOpportunityTask && (
+            <div style={{ marginTop: 12, padding: "12px 14px", background: "#182133", border: "1px solid #24324f", borderRadius: 10 }}>
+              <p style={{ margin: 0, fontSize: 13, color: "#d9e6ff", lineHeight: 1.6 }}>
+                Researching Google Maps reviews...
+                <br />
+                This may take 1-3 minutes.
+              </p>
+              <div style={{ marginTop: 10, fontSize: 12, color: "#9fb2d9", lineHeight: 1.7 }}>
+                <div>Task ID: {reviewOpportunityTask.taskId}</div>
+                <div>Current status: {reviewOpportunityTask.status}</div>
+                <div>Last update: {new Date(reviewOpportunityTask.lastUpdatedAt).toLocaleString()}</div>
+              </div>
+            </div>
           )}
 
           {reviewOpportunityError && (
@@ -313,16 +505,23 @@ export default function AccountsStep({
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
               <div>
                 <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#7d97d9", marginBottom: 4 }}>
-                  Review-Based Opportunities
+                  Google Maps Opportunities
                 </div>
                 <div style={{ fontSize: 12, color: "#7f8ca8" }}>
                   Source mode: {reviewOpportunityData.sourceMode}
+                  {reviewOpportunityTask ? ` • Task ${reviewOpportunityTask.status}` : ""}
                 </div>
               </div>
               <div style={{ fontSize: 12, color: "#7f8ca8" }}>
                 {reviewOpportunityData.results.length} opportunities
               </div>
             </div>
+
+            {reviewOpportunityData.liveFailureReason && (
+              <div style={{ marginBottom: 12, fontSize: 12, color: "#f3c98b" }}>
+                Live research note: {reviewOpportunityData.liveFailureReason}
+              </div>
+            )}
 
             {reviewOpportunityData.results.length === 0 ? (
               <div style={{ background: "#161616", border: "1px solid #2a2a2a", borderRadius: 12, padding: 24 }}>
