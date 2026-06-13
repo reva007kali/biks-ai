@@ -74,6 +74,13 @@ export interface SalesKit {
   memoriesUsed: string[];
 }
 
+export interface ReviewAnalysis {
+  reviews: { text: string; rating: number; source: string; sentiment: string }[];
+  painPoints: { issue: string; frequency: string; severity: string; evidence: string }[];
+  solutionMapping: { painPoint: string; ourSolution: string; talkingPoint: string }[];
+  summary: string;
+}
+
 function App() {
   const [step, setStep] = useState(1);
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
@@ -83,6 +90,7 @@ function App() {
   const [brief, setBrief] = useState<MeetingBrief | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [salesKit, setSalesKit] = useState<SalesKit | null>(null);
+  const [reviewAnalysis, setReviewAnalysis] = useState<ReviewAnalysis | null>(null);
   const [initialCategory, setInitialCategory] = useState(0);
 
   const handleReset = () => {
@@ -94,6 +102,7 @@ function App() {
     setBrief(null);
     setContacts([]);
     setSalesKit(null);
+    setReviewAnalysis(null);
     setInitialCategory(0);
   };
 
@@ -129,7 +138,7 @@ function App() {
           setLeads={setLeads}
           contacts={contacts}
           setContacts={setContacts}
-          onSelectLead={(lead) => { setSelectedLead(lead); setContacts([]); setBrief(null); setSalesKit(null); setStep(4); }}
+          onSelectLead={(lead) => { setSelectedLead(lead); setContacts([]); setBrief(null); setSalesKit(null); setReviewAnalysis(null); setStep(4); }}
           onBack={() => setStep(2)}
           initialCategory={initialCategory}
         />
@@ -145,6 +154,8 @@ function App() {
           setContacts={setContacts}
           salesKit={salesKit}
           setSalesKit={setSalesKit}
+          reviewAnalysis={reviewAnalysis}
+          setReviewAnalysis={setReviewAnalysis}
           onBack={() => setStep(3)}
         />
       )}

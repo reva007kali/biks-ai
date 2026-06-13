@@ -128,4 +128,22 @@ describe("API route handlers", () => {
       close();
     }
   });
+
+  it("POST /api/scrape-reviews requires leadName", async () => {
+    const app = createTestApp();
+    const { port, close } = await startServer(app);
+
+    try {
+      const res = await fetch(`http://localhost:${port}/api/scrape-reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toBe("leadName is required");
+    } finally {
+      close();
+    }
+  });
 });

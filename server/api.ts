@@ -988,4 +988,197 @@ api.post("/api/send-kit-email", async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================
+// POST /api/scrape-reviews — Fetch & analyze Google Reviews of prospect
+// ============================================================
+api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
+  const exaKey = process.env.EXA_API_KEY;
+  if (!exaKey) {
+    return res.status(500).json({ error: "Exa not configured" });
+  }
+
+  const { leadName, leadUrl, sellerProducts, sellerSummary } = req.body;
+  if (!leadName) {
+    return res.status(400).json({ error: "leadName is required" });
+  }
+
+  try {
+    // Step 1: Search for Google Reviews of the prospect company via Exa
+    const reviewQueries = [
+      `${leadName} Google reviews`,
+      `${leadName} customer reviews complaints`,
+      `${leadName} review rating feedback`,
+    ];
+
+    const fetchExa = async (q: string) => {
+      const body: any = {
+        query: q,
+        type: "auto",
+        numResults: 5,
+        contents: {
+          text: { maxCharacters: 3000 },
+          highlights: true,
+          summary: true,
+        },
+      };
+      const r = await fetch("https://api.exa.ai/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": exaKey },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) return [];
+      const d: any = await r.json();
+      return d.results || [];
+    };
+
+    // Run all queries in parallel
+    const allResults = await Promise.all(reviewQueries.map(fetchExa));
+    const merged = allResults.flat();
+
+    // Deduplicate by URL
+    const seen = new Set<string>();
+    const unique: any[] = [];
+    for (const r of merged) {
+      const url = (r.url || "").toLowerCase().replace(/\/$/, "");
+      if (!seen.has(url)) {
+        seen.add(url);
+        unique.push(r);
+      }
+    }
+
+    // Extract review content
+    const reviewTexts = unique.slice(0, 8).map((r: any) => {
+      const text = r.text || r.summary || "";
+      const highlights = (r.highlights || []).join(" ");
+      return `Source: ${r.url}\nTitle: ${r.title || ""}\nContent: ${text}\nHighlights: ${highlights}`;
+    }).join("\n\n---\n\n");
+
+    if (!reviewTexts.trim()) {
+      return res.json({
+        reviews: [],
+        painPoints: [],
+        solutionMapping: [],
+        summary: "No reviews found for this company.",
+      });
+    }
+
+    // Step 2: Use LLM to analyze reviews and extract pain points
+    const analysisPrompt = `You are analyzing customer reviews and feedback about "${leadName}" (${leadUrl || ""}).
+
+Here is the review/feedback content found online:
+${reviewTexts}
+
+Our company offers these products/services:
+${(sellerProducts || []).join(", ")}
+
+Our company summary: ${sellerSummary || ""}
+
+Analyze the reviews and return ONLY valid JSON with this structure:
+{
+  "reviews": [
+    {
+      "text": "The actual review or complaint text (quoted or paraphrased)",
+      "rating": 1-5 (estimated star rating, use 0 if unknown),
+      "source": "URL where this was found",
+      "sentiment": "negative" | "neutral" | "positive"
+    }
+  ],
+  "painPoints": [
+    {
+      "issue": "Short description of the pain point",
+      "frequency": "How often this is mentioned (common/occasional/rare)",
+      "severity": "high" | "medium" | "low",
+      "evidence": "Direct quote or paraphrase from reviews"
+    }
+  ],
+  "solutionMapping": [
+    {
+      "painPoint": "The prospect's pain point",
+      "ourSolution": "How our product/service solves this",
+      "talkingPoint": "A specific talking point for the sales conversation"
+    }
+  ],
+  "summary": "2-3 sentence summary of the prospect's main weaknesses/pain points that we can address"
+}
+
+Focus on NEGATIVE reviews and complaints. Extract 3-6 pain points. Map each to our solutions where possible. If reviews are mostly positive, still identify areas of improvement or gaps we can fill.`;
+
+    const result = await invokeLLM({
+      messages: [
+        { role: "system", content: "You are a competitive intelligence analyst. Extract pain points from reviews and map them to sales opportunities. Return only valid JSON." },
+        { role: "user", content: analysisPrompt },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "review_analysis",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: {
+              reviews: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    text: { type: "string" },
+                    rating: { type: "number" },
+                    source: { type: "string" },
+                    sentiment: { type: "string" },
+                  },
+                  required: ["text", "rating", "source", "sentiment"],
+                  additionalProperties: false,
+                },
+              },
+              painPoints: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    issue: { type: "string" },
+                    frequency: { type: "string" },
+                    severity: { type: "string" },
+                    evidence: { type: "string" },
+                  },
+                  required: ["issue", "frequency", "severity", "evidence"],
+                  additionalProperties: false,
+                },
+              },
+              solutionMapping: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    painPoint: { type: "string" },
+                    ourSolution: { type: "string" },
+                    talkingPoint: { type: "string" },
+                  },
+                  required: ["painPoint", "ourSolution", "talkingPoint"],
+                  additionalProperties: false,
+                },
+              },
+              summary: { type: "string" },
+            },
+            required: ["reviews", "painPoints", "solutionMapping", "summary"],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+
+    const rawContent = result.choices?.[0]?.message?.content;
+    const content = typeof rawContent === "string" ? rawContent : "{}";
+    let analysis;
+    try {
+      analysis = JSON.parse(content);
+    } catch {
+      analysis = { reviews: [], painPoints: [], solutionMapping: [], summary: "Failed to analyze reviews." };
+    }
+
+    return res.json(analysis);
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 export default api;

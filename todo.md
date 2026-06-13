@@ -134,3 +134,17 @@
 - [x] Add email preview in Marketing Kit tab before sending
 - [x] Render the native HTML email in an iframe so user can review
 - [x] Preview shows exactly what will be sent via Resend
+
+## Review Scraper & Pain Points Feature
+- [x] POST /api/scrape-reviews - Fetch customer reviews/feedback of prospect company via Exa web search
+- [x] LLM analysis of negative reviews to extract pain points
+- [x] Map pain points to seller's services/solutions
+- [x] Return structured data: reviews, pain points, solution mapping, summary
+- [x] Add "Prospect Pain Points" section in Account Brief tab
+- [x] Auto-fetch reviews when lead is selected in Brief page
+- [x] Display review snippets with star ratings and sentiment indicators (negative filtered first)
+- [x] Display pain points with severity badges (high=red, medium=yellow, low=gray)
+- [x] Display solution mapping table (Their Pain → Our Solution → Talking Point)
+- [x] Loading state while scraping/analyzing
+- [x] Error handling: graceful fallback when reviews API fails or returns empty
+- [ ] Feed pain points into Marketing Kit email generation for personalized outreach

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { BusinessProfile, Lead, MemoryItem, MeetingBrief, Contact, SalesKit } from "../App";
+import type { BusinessProfile, Lead, MemoryItem, MeetingBrief, Contact, SalesKit, ReviewAnalysis } from "../App";
 
 interface Props {
   business: BusinessProfile;
@@ -11,10 +11,12 @@ interface Props {
   setContacts: (c: Contact[]) => void;
   salesKit: SalesKit | null;
   setSalesKit: (k: SalesKit | null) => void;
+  reviewAnalysis: ReviewAnalysis | null;
+  setReviewAnalysis: (r: ReviewAnalysis | null) => void;
   onBack: () => void;
 }
 
-export default function BriefStep({ business, lead, memories, brief, setBrief, contacts, setContacts, salesKit, setSalesKit, onBack }: Props) {
+export default function BriefStep({ business, lead, memories, brief, setBrief, contacts, setContacts, salesKit, setSalesKit, reviewAnalysis, setReviewAnalysis, onBack }: Props) {
   const [tab, setTab] = useState<"account" | "email" | "meeting" | "kit">("account");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ pct: 0, message: "", detail: "" });
@@ -28,6 +30,8 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   const [kitEmailSent, setKitEmailSent] = useState(false);
   const [kitEmailError, setKitEmailError] = useState("");
   const [contactsLoading, setContactsLoading] = useState(true);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsError, setReviewsError] = useState("");
   const [showEmailPreview, setShowEmailPreview] = useState(false);
   const [emailPreviewHtml, setEmailPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -59,6 +63,8 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     if (!brief) generateBrief();
     // Always fetch contacts for the current lead
     fetchContacts();
+    // Fetch reviews for the current lead
+    fetchReviews();
   }, [lead.name]);
 
   const fetchContacts = async () => {
@@ -75,6 +81,33 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
       }
     } catch {}
     setContactsLoading(false);
+  };
+
+  const fetchReviews = async () => {
+    if (reviewAnalysis) return; // Already fetched
+    setReviewsLoading(true);
+    setReviewsError("");
+    try {
+      const res = await fetch("/api/scrape-reviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadName: lead.name,
+          leadUrl: lead.url,
+          sellerProducts: business.products,
+          sellerSummary: business.summary,
+        }),
+      });
+      const data = await res.json();
+      if (data && !data.error) {
+        setReviewAnalysis(data);
+      } else if (data?.error) {
+        setReviewsError(data.error);
+      }
+    } catch (e: any) {
+      setReviewsError(e.message || "Failed to fetch reviews");
+    }
+    setReviewsLoading(false);
   };
 
   const generateBrief = async () => {
@@ -237,6 +270,14 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     { key: "meeting" as const, label: "Meeting Prep" },
     { key: "kit" as const, label: "Marketing Kit" },
   ];
+
+  const severityColor = (severity: string) => {
+    switch (severity.toLowerCase()) {
+      case "high": return { bg: "#2a1515", border: "#4a2020", text: "#f5454a" };
+      case "medium": return { bg: "#2a2515", border: "#4a3d20", text: "#f5c842" };
+      default: return { bg: "#1a1a1a", border: "#2a2a2a", text: "#888" };
+    }
+  };
 
   return (
     <div style={{ display: "flex", height: "calc(100vh - 57px)", overflow: "hidden" }}>
@@ -442,6 +483,160 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                       borderRadius: 8, padding: "20px", textAlign: "center",
                     }}>
                       <div style={{ fontSize: 13, color: "#555" }}>No decision makers found for this company</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Prospect Pain Points — Review Analysis */}
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
+                    PROSPECT PAIN POINTS
+                  </div>
+                  {reviewsLoading ? (
+                    <div style={{
+                      background: "#1c1c1c", border: "1px solid #2a2a2a",
+                      borderRadius: 8, padding: "24px", textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 13, color: "#555", marginBottom: 8 }}>Analyzing customer reviews...</div>
+                      <div style={{
+                        width: 16, height: 16, border: "2px solid #f5454a",
+                        borderTopColor: "transparent", borderRadius: "50%",
+                        animation: "spin 1s linear infinite",
+                        margin: "0 auto",
+                      }} />
+                    </div>
+                  ) : reviewAnalysis && reviewAnalysis.painPoints.length > 0 ? (
+                    <div>
+                      {/* Summary */}
+                      {reviewAnalysis.summary && (
+                        <div style={{
+                          background: "#1a1520", border: "1px solid #3a2040",
+                          borderRadius: 8, padding: "14px 18px", marginBottom: 16,
+                          fontSize: 13, color: "#d4a0e8", lineHeight: 1.6,
+                        }}>
+                          {reviewAnalysis.summary}
+                        </div>
+                      )}
+
+                      {/* Pain Points List */}
+                      <div style={{ marginBottom: 16 }}>
+                        {reviewAnalysis.painPoints.map((pp, i) => {
+                          const colors = severityColor(pp.severity);
+                          return (
+                            <div key={i} style={{
+                              background: "#1c1c1c", border: "1px solid #2a2a2a",
+                              borderRadius: 8, padding: "14px 16px", marginBottom: 8,
+                              borderLeft: `3px solid ${colors.text}`,
+                            }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                                <span style={{ fontSize: 14, fontWeight: 600, color: "#f0f0f0", flex: 1 }}>
+                                  {pp.issue}
+                                </span>
+                                <span style={{
+                                  fontSize: 10, fontWeight: 700, letterSpacing: "0.05em",
+                                  textTransform: "uppercase",
+                                  padding: "3px 8px", borderRadius: 4,
+                                  background: colors.bg, border: `1px solid ${colors.border}`,
+                                  color: colors.text,
+                                }}>
+                                  {pp.severity}
+                                </span>
+                                <span style={{
+                                  fontSize: 10, color: "#666",
+                                  padding: "3px 8px", background: "#1a1a1a",
+                                  borderRadius: 4, border: "1px solid #2a2a2a",
+                                }}>
+                                  {pp.frequency}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 12, color: "#888", lineHeight: 1.5, fontStyle: "italic" }}>
+                                "{pp.evidence}"
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Solution Mapping Table */}
+                      {reviewAnalysis.solutionMapping.length > 0 && (
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+                            SOLUTION MAPPING
+                          </div>
+                          <div style={{ border: "1px solid #2a2a2a", borderRadius: 8, overflow: "hidden" }}>
+                            <div style={{
+                              display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
+                              background: "#161616", padding: "10px 14px",
+                              borderBottom: "1px solid #2a2a2a",
+                            }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#f5454a" }}>Their Pain</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#5b8af5" }}>Our Solution</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#3ecf8e" }}>Talking Point</span>
+                            </div>
+                            {reviewAnalysis.solutionMapping.map((sm, i) => (
+                              <div key={i} style={{
+                                display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
+                                padding: "10px 14px", background: "#1c1c1c",
+                                borderBottom: i < reviewAnalysis.solutionMapping.length - 1 ? "1px solid #222" : "none",
+                              }}>
+                                <span style={{ fontSize: 12, color: "#ccc" }}>{sm.painPoint}</span>
+                                <span style={{ fontSize: 12, color: "#ccc" }}>{sm.ourSolution}</span>
+                                <span style={{ fontSize: 12, color: "#888", fontStyle: "italic" }}>{sm.talkingPoint}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Review Snippets */}
+                      {reviewAnalysis.reviews.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+                            REVIEW SNIPPETS
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                            {reviewAnalysis.reviews
+                        .sort((a, b) => (a.sentiment === "negative" ? -1 : 1) - (b.sentiment === "negative" ? -1 : 1))
+                        .slice(0, 4).map((rev, i) => (
+                              <div key={i} style={{
+                                background: "#161616", border: "1px solid #2a2a2a",
+                                borderRadius: 8, padding: "12px 14px",
+                              }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                                  <span style={{ fontSize: 11, color: rev.sentiment === "negative" ? "#f5454a" : rev.sentiment === "positive" ? "#3ecf8e" : "#888" }}>
+                                    {rev.sentiment === "negative" ? "▼" : rev.sentiment === "positive" ? "▲" : "—"}
+                                  </span>
+                                  {rev.rating > 0 && (
+                                    <span style={{ fontSize: 11, color: "#f5c842" }}>
+                                      {"★".repeat(rev.rating)}{"☆".repeat(5 - rev.rating)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: 12, color: "#aaa", lineHeight: 1.5 }}>
+                                  "{rev.text.slice(0, 120)}{rev.text.length > 120 ? "..." : ""}"
+                                </div>
+                                <a
+                                  href={rev.source}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{ fontSize: 10, color: "#5b8af5", textDecoration: "none", marginTop: 6, display: "block" }}
+                                >
+                                  Source ↗
+                                </a>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{
+                      background: "#1c1c1c", border: "1px solid #2a2a2a",
+                      borderRadius: 8, padding: "20px", textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 13, color: "#555" }}>
+                        {reviewAnalysis?.summary || "No customer reviews found for this company"}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -737,8 +932,8 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                             display: "flex", alignItems: "center", justifyContent: "space-between",
                           }}
                         >
-                          <span>{previewLoading ? "⏳ Loading..." : `👁 ${showEmailPreview ? "Hide" : "Preview"} Email`}</span>
-                          <span style={{ fontSize: 11, color: "#666" }}>{showEmailPreview ? "▲" : "▼"}</span>
+                          <span>{previewLoading ? "Loading..." : `${showEmailPreview ? "Hide" : "Preview"} Email`}</span>
+                          <span style={{ fontSize: 11, color: "#666" }}>{showEmailPreview ? "\u25B2" : "\u25BC"}</span>
                         </button>
                         {showEmailPreview && (
                           <div style={{
