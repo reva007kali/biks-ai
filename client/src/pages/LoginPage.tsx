@@ -39,7 +39,7 @@ export default function LoginPage() {
     }}>
       {/* Brand */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
-        <span style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 18, color: "var(--ink)", letterSpacing: "-0.01em" }}>Biks<span style={{ color: "var(--sage-strong)" }}>.ai</span></span>
+        <span style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 18, color: "var(--ink)", letterSpacing: "-0.01em" }}>Biks.ai</span>
       </div>
 
       <div style={{

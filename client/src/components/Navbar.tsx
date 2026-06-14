@@ -35,7 +35,7 @@ export default function Navbar({ currentStep, maxStepReached, canNavigateToStep,
       {/* Logo */}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 17, color: "var(--ink)", letterSpacing: "-0.01em" }}>
-          Biks<span style={{ color: "var(--sage-strong)" }}>.ai</span>
+          Biks.ai
         </span>
       </div>
 
