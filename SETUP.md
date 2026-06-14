@@ -29,18 +29,30 @@ MEM0_API_KEY=
 RESEND_API_KEY=
 RESEND_FROM_EMAIL=
 
-# Biarkan seperti ini
-JWT_SECRET=local-dev-secret
-OAUTH_SERVER_URL=
+# Supabase (auth + Postgres). Dari Supabase Dashboard → Project Settings → API.
+# Kosongkan keduanya kalau mau jalan TANPA login (mode fallback lokal).
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+OWNER_EMAIL=            # opsional: email yang boleh akses prosedur admin
+
 PORT=3000
 ```
 
-**3. Jalankan**
+**3. Setup database Supabase** (sekali saja, hanya jika pakai login)
+- Buka Supabase Dashboard → **SQL Editor** → jalankan isi file [`supabase/schema.sql`](supabase/schema.sql).
+  Ini membuat tabel `profiles` + `histories`, RLS, dan trigger auto-buat profile saat signup.
+- Dashboard → **Authentication → URL Configuration**: tambahkan URL app (mis. `http://localhost:3000`
+  dan domain produksi) ke *Site URL* / *Redirect URLs*.
+- (Opsional) Authentication → Providers → Email: matikan *Confirm email* kalau mau user langsung
+  login setelah signup tanpa verifikasi email.
+
+**4. Jalankan**
 ```bash
 pnpm dev
 ```
 
-Buka `http://localhost:3000` — selesai, tidak perlu install database atau login.
+Buka `http://localhost:3000`. Jika `VITE_SUPABASE_*` diisi, app meminta login (email/password)
+dan menyimpan data user ke Postgres Supabase. Jika dikosongkan, app jalan tanpa login.
 
 ---
 

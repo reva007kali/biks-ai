@@ -1,8 +1,41 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { ENV } from "./_core/env";
 import { manusTask, startManusTask, checkManusTask } from "./_core/manus";
+import {
+  isSupabaseConfigured,
+  verifyRequestUser,
+  type SupabaseUser,
+} from "./_core/supabaseAuth";
 
 const api = Router();
+
+// Endpoints reachable without a logged-in session. Everything else under
+// `/api/*` requires a valid Supabase bearer token.
+const PUBLIC_API_PATHS = new Set<string>(["/api/notify-signup"]);
+
+// ============================================================
+// Auth gate — every /api/* call must carry a valid Supabase token.
+// When Supabase isn't configured (local dev without keys) the gate is open,
+// matching the client's graceful fallback.
+// ============================================================
+api.use(async (req: Request, res: Response, next: NextFunction) => {
+  // This router is mounted at "/", so it sees every request. Only guard our own
+  // REST endpoints — let static HTML/assets and tRPC (which does its own auth)
+  // pass straight through.
+  if (!req.path.startsWith("/api/")) return next();
+  if (req.path.startsWith("/api/trpc")) return next();
+  if (req.method === "OPTIONS") return next();
+  if (PUBLIC_API_PATHS.has(req.path)) return next();
+  if (!isSupabaseConfigured) return next();
+
+  const user = await verifyRequestUser(req);
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  (req as Request & { user?: SupabaseUser }).user = user;
+  next();
+});
 
 // ============================================================
 // SSE Helper

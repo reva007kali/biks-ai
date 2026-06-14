@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import type { BusinessProfile, Lead, MemoryItem, MeetingBrief, Contact, SalesKit, ReviewAnalysis } from "../App";
 import { useIsMobile } from "../hooks/useMobile";
 import Tooltip from "../components/Tooltip";
+import { apiFetch } from "../lib/api";
 
 interface Props {
   business: BusinessProfile;
@@ -55,7 +56,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     setPreviewLoading(true);
     setShowEmailPreview(true);
     try {
-      const res = await fetch("/api/preview-kit-email", {
+      const res = await apiFetch("/api/preview-kit-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ business, lead, salesKit, contacts, painPoints: reviewAnalysis?.painPoints || [] }),
@@ -86,7 +87,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   const fetchContacts = async () => {
     setContactsLoading(true);
     try {
-      const res = await fetch("/api/find-contacts", {
+      const res = await apiFetch("/api/find-contacts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ leadName: lead.name, city: lead.city, leadUrl: lead.url }),
@@ -106,7 +107,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     setReviewsLoading(true);
     setReviewsError("");
     try {
-      const res = await fetch("/api/scrape-reviews", {
+      const res = await apiFetch("/api/scrape-reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -130,7 +131,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
           break;
         }
         await new Promise(r => setTimeout(r, 3000));
-        const pollRes = await fetch(`/api/poll-task?id=${taskId}`);
+        const pollRes = await apiFetch(`/api/poll-task?id=${taskId}`);
         const status = await pollRes.json();
         if (status.status === "done") {
           setReviewAnalysis(status.result as ReviewAnalysis);
@@ -152,7 +153,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     setProgress({ pct: 0, message: "Starting...", detail: "" });
 
     try {
-      const res = await fetch("/api/generate-brief", {
+      const res = await apiFetch("/api/generate-brief", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -170,7 +171,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
       while (true) {
         if (Date.now() - startTime > 150_000) { setLoading(false); break; }
         await new Promise(r => setTimeout(r, 3000));
-        const pollRes = await fetch(`/api/poll-task?id=${taskId}`);
+        const pollRes = await apiFetch(`/api/poll-task?id=${taskId}`);
         const status = await pollRes.json();
         if (status.status === "done") { setBrief(status.result); setLoading(false); return; }
         if (status.status === "error") { setLoading(false); break; }
@@ -185,7 +186,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   // Runs one generation attempt. Returns true on success, false on any failure
   // (server error event, dropped stream, or network error) so the caller can retry.
   const runSalesKitAttempt = async (): Promise<boolean> => {
-    const res = await fetch("/api/generate-sales-kit", {
+    const res = await apiFetch("/api/generate-sales-kit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -207,7 +208,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     while (true) {
       if (Date.now() - startTime > 180_000) return false;
       await new Promise(r => setTimeout(r, 3000));
-      const pollRes = await fetch(`/api/poll-task?id=${taskId}`);
+      const pollRes = await apiFetch(`/api/poll-task?id=${taskId}`);
       const status = await pollRes.json();
       if (status.status === "done") { setSalesKit(status.result); return true; }
       if (status.status === "error") return false;
@@ -247,7 +248,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     setEmailSending(true);
     setEmailError("");
     try {
-      const res = await fetch("/api/send-email", {
+      const res = await apiFetch("/api/send-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -273,7 +274,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     setKitEmailSending(true);
     setKitEmailError("");
     try {
-      const res = await fetch("/api/send-kit-email", {
+      const res = await apiFetch("/api/send-kit-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

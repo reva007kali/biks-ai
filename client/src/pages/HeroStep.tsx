@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import type { BusinessProfile } from "../App";
 import { useIsMobile } from "../hooks/useMobile";
 import Reveal from "../components/Reveal";
+import { apiFetch } from "../lib/api";
 
 interface Props {
   onComplete: (data: BusinessProfile) => void;
@@ -32,7 +33,7 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
     setProgress({ pct: 0, message: "Starting analysis...", detail: "" });
 
     try {
-      const res = await fetch("/api/analyze-website", {
+      const res = await apiFetch("/api/analyze-website", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim().startsWith("http") ? url.trim() : `https://${url.trim()}` }),
@@ -57,7 +58,7 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
         }
         await new Promise(r => setTimeout(r, 3000));
         try {
-          const pollRes = await fetch(`/api/poll-task?id=${taskId}`);
+          const pollRes = await apiFetch(`/api/poll-task?id=${taskId}`);
           const status = await pollRes.json();
           if (status.status === "done") {
             onComplete(status.result);

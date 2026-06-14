@@ -1,6 +1,7 @@
 import { useState, type CSSProperties } from "react";
 import type { BusinessProfile, Lead, MemoryItem, Contact } from "../App";
 import { useIsMobile } from "../hooks/useMobile";
+import { apiFetch } from "../lib/api";
 import Tooltip from "../components/Tooltip";
 
 interface Props {
@@ -52,7 +53,7 @@ export default function AccountsStep({
 
     try {
       setSearchMessage("");
-      const res = await fetch("/api/exa-search", {
+      const res = await apiFetch("/api/exa-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query, city, numResults: 8 }),
@@ -84,7 +85,7 @@ export default function AccountsStep({
     setLeads(updated);
 
     try {
-      const res = await fetch("/api/mem0", {
+      const res = await apiFetch("/api/mem0", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: `Rejected lead "${leads[idx].name}": ${rejectReason}` }),
@@ -118,7 +119,7 @@ export default function AccountsStep({
   const deleteMemory = async (id: string) => {
     setDeletingMemId(id);
     try {
-      await fetch(`/api/mem0?id=${id}`, { method: "DELETE" });
+      await apiFetch(`/api/mem0?id=${id}`, { method: "DELETE" });
       setMemories(memories.filter(m => m.id !== id));
     } catch {}
     setDeletingMemId(null);

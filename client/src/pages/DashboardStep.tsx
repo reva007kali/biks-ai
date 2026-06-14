@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import type { BusinessProfile, MemoryItem } from "../App";
 import { useIsMobile } from "../hooks/useMobile";
+import { apiFetch } from "../lib/api";
 import Tooltip from "../components/Tooltip";
 
 interface Props {
@@ -25,7 +26,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
   const fetchMemories = async () => {
     setFetching(true);
     try {
-      const res = await fetch("/api/mem0");
+      const res = await apiFetch("/api/mem0");
       const data = await res.json();
       if (data.available && Array.isArray(data.items)) {
         setMemories(data.items);
@@ -38,7 +39,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
     if (!memoryInput.trim()) return;
     setSaving(true);
     try {
-      const res = await fetch("/api/mem0", {
+      const res = await apiFetch("/api/mem0", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: memoryInput.trim() }),
@@ -57,7 +58,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
   const deleteMemory = async (id: string) => {
     setDeletingId(id);
     try {
-      await fetch(`/api/mem0?id=${id}`, { method: "DELETE" });
+      await apiFetch(`/api/mem0?id=${id}`, { method: "DELETE" });
       setMemories(memories.filter(m => m.id !== id));
     } catch {}
     setDeletingId(null);

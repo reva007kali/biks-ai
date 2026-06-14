@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import type { MemoryItem } from "../App";
+import { apiFetch } from "../lib/api";
 
 interface Props {
   memories: MemoryItem[];
@@ -21,7 +22,7 @@ export default function MemoryStep({ memories, setMemories, onNext, onBack }: Pr
   const fetchMemories = async () => {
     setFetching(true);
     try {
-      const res = await fetch("/api/mem0");
+      const res = await apiFetch("/api/mem0");
       const data = await res.json();
       if (data.available && Array.isArray(data.items)) {
         setMem0Available(true);
@@ -35,7 +36,7 @@ export default function MemoryStep({ memories, setMemories, onNext, onBack }: Pr
     if (!input.trim()) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/mem0", {
+      const res = await apiFetch("/api/mem0", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: input.trim() }),
@@ -51,7 +52,7 @@ export default function MemoryStep({ memories, setMemories, onNext, onBack }: Pr
 
   const deleteMemory = async (id: string) => {
     try {
-      await fetch(`/api/mem0?id=${id}`, { method: "DELETE" });
+      await apiFetch(`/api/mem0?id=${id}`, { method: "DELETE" });
       setMemories(memories.filter(m => m.id !== id));
     } catch {}
   };
